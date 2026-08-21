@@ -1,3 +1,343 @@
+/* ==========================================================================
+   FUENTES LOCALES — SK Modernist
+   ========================================================================== */
+@font-face {
+  font-family: 'SKModernist';
+  src: url('./fonts/sk-modernist-regular-webfont.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'SKModernist';
+  src: url('./fonts/sk-modernist-bold-webfont.woff') format('woff');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ==========================================================================
+   SISTEMA DE DISEÑO — Taller Pedro Espinoza
+   Paleta: Negro / Azules profundos / Amarillo dorado
+   Modo oscuro único
+   ========================================================================== */
+
+:root {
+  /* --------------------------------------------------------------------
+     FONDOS Y SUPERFICIES
+     -------------------------------------------------------------------- */
+  --background:      #000814;   /* Ink Black — fondo base */
+  --surface:         #001224;   /* entre ink y prussian — cards, panels */
+  --surface-hover:   #001a33;   /* hover sobre surface */
+  --surface-raised:  #001D3D;   /* Prussian Blue — elementos elevados */
+
+  /* --------------------------------------------------------------------
+     ESCALA DE AZULES ESTRUCTURALES
+     -------------------------------------------------------------------- */
+  --blue-900: #001D3D;   /* Prussian Blue */
+  --blue-800: #002a52;
+  --blue-700: #003566;   /* Oxford Navy */
+  --blue-600: #004080;
+  --blue-500: #005099;
+  --blue-400: #0066cc;   /* azul interactivo, links */
+  --blue-300: #3385d6;
+  --blue-200: #66a8e8;
+  --blue-100: #99c8f5;
+
+  /* --------------------------------------------------------------------
+     AMARILLO / DORADO — acción primaria, highlights, CTAs
+     -------------------------------------------------------------------- */
+  --yellow-500: #FFC300;   /* School Bus Yellow — acción principal */
+  --yellow-400: #FFD60A;   /* Gold — hover del anterior */
+  --yellow-300: #ffe066;   /* amarillo suave para texto sobre fondo oscuro */
+  --yellow-100: #fff4cc;   /* tinte muy suave, backgrounds de alerta */
+
+  /* --------------------------------------------------------------------
+     BORDES Y NEUTROS
+     -------------------------------------------------------------------- */
+  --border:          #002a52;   /* borde default */
+  --border-hover:    #003566;   /* borde hover/focus */
+  --neutral-600:     #1a2e44;
+  --neutral-500:     #2a4060;
+  --neutral-400:     #3d5a7a;   /* texto terciario, placeholders */
+  --neutral-300:     #6b8aaa;   /* texto secundario, labels */
+  --neutral-200:     #9ab0c8;   /* texto de apoyo */
+
+  /* --------------------------------------------------------------------
+     TEXTO
+     -------------------------------------------------------------------- */
+  --foreground:      #FAFAFF;   /* Ghost White — texto principal */
+  --text-secondary:  #c8d4e8;   /* blanco con tinte azul — texto secundario */
+  --text-tertiary:   #9ab0c8;   /* texto de menor jerarquía */
+  --text-disabled:   #3d5a7a;
+
+  /* --------------------------------------------------------------------
+     SEMÁNTICOS
+     -------------------------------------------------------------------- */
+  --danger:          #e5484d;
+  --danger-bg:       rgba(229, 72, 77, 0.08);
+  --warning:         #FFC300;
+  --success:         #22c55e;
+  --success-bg:      rgba(34, 197, 94, 0.08);
+
+  /* --------------------------------------------------------------------
+     ESTADOS DE ÓRDENES (colores del sistema)
+     -------------------------------------------------------------------- */
+  --estado-recibido:   #6b8aaa;   /* gris azulado */
+  --estado-en-proceso: #FFC300;   /* amarillo */
+  --estado-listo:      #22c55e;   /* verde */
+  --estado-entregado:  #3385d6;   /* azul */
+  --estado-cancelado:  #e5484d;   /* rojo */
+
+  /* --------------------------------------------------------------------
+     ALIASES
+     -------------------------------------------------------------------- */
+  --primary:         var(--yellow-500);
+  --primary-hover:   var(--yellow-400);
+  --card:            var(--surface);
+
+  /* --------------------------------------------------------------------
+     TIPOGRAFÍA — escalas de tamaño
+     -------------------------------------------------------------------- */
+  --text-hero:       4.5rem;
+  --text-title:      2.5rem;
+  --text-subtitle:   1.5rem;
+  --text-body-lg:    1.125rem;
+  --text-body:       1rem;
+  --text-small:      0.875rem;
+  --text-xs:         0.75rem;
+
+  /* --------------------------------------------------------------------
+     TIPOGRAFÍA — pesos
+     -------------------------------------------------------------------- */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* --------------------------------------------------------------------
+     ESPACIADO Y RADIO
+     -------------------------------------------------------------------- */
+  --radius-sm:   0.375rem;
+  --radius-md:   0.5rem;
+  --radius-lg:   0.75rem;
+  --radius-xl:   1rem;
+  --radius-full: 9999px;
+
+  /* --------------------------------------------------------------------
+     SOMBRAS
+     -------------------------------------------------------------------- */
+  --shadow-sm:  0 1px 3px rgba(0, 8, 20, 0.4);
+  --shadow-md:  0 4px 12px rgba(0, 8, 20, 0.5);
+  --shadow-lg:  0 8px 24px rgba(0, 8, 20, 0.6);
+  --glow-yellow: 0 0 0 3px rgba(255, 195, 0, 0.2);
+  --glow-blue:   0 0 0 3px rgba(0, 102, 204, 0.2);
+}
+
+/* ==========================================================================
+   BASE
+   ========================================================================== */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: 'SKModernist', -apple-system, 'Segoe UI', Arial, sans-serif;
+    font-size: var(--text-body);
+    font-weight: var(--weight-regular);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar          { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track    { background: transparent; }
+  ::-webkit-scrollbar-thumb    { background: var(--blue-700); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--blue-600); }
+
+  /* Selección de texto */
+  ::selection {
+    background: var(--yellow-500);
+    color: var(--background);
+  }
+
+  /* Links */
+  a {
+    color: var(--blue-400);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--yellow-400);
+  }
+
+  /* Inputs base */
+  input, textarea, select {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    color: var(--foreground);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.75rem;
+    font-size: var(--text-body);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    width: 100%;
+  }
+  input:focus, textarea:focus, select:focus {
+    border-color: var(--yellow-500);
+    box-shadow: var(--glow-yellow);
+  }
+  input::placeholder, textarea::placeholder {
+    color: var(--neutral-400);
+  }
+
+  /* Botón base */
+  button {
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    font-size: var(--text-body);
+    border-radius: var(--radius-md);
+    transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  }
+  button:active {
+    transform: scale(0.98);
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+/* ==========================================================================
+   UTILIDADES
+   ========================================================================== */
+@layer utilities {
+
+  /* Fondos */
+  .bg-base      { background-color: var(--background); }
+  .bg-surface   { background-color: var(--surface); }
+  .bg-raised    { background-color: var(--surface-raised); }
+
+  /* Texto */
+  .text-primary   { color: var(--foreground); }
+  .text-secondary { color: var(--text-secondary); }
+  .text-tertiary  { color: var(--text-tertiary); }
+  .text-yellow    { color: var(--yellow-500); }
+  .text-blue      { color: var(--blue-400); }
+  .text-danger    { color: var(--danger); }
+  .text-success   { color: var(--success); }
+
+  /* Bordes */
+  .border-default { border: 1px solid var(--border); }
+  .border-hover   { border: 1px solid var(--border-hover); }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+  }
+  .card-raised {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-hover);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Botones */
+  .btn-primary {
+    background: var(--yellow-500);
+    color: var(--background);
+    font-weight: var(--weight-bold);
+    padding: 0.625rem 1.25rem;
+    border-radius: var(--radius-md);
+  }
+  .btn-primary:hover {
+    background: var(--yellow-400);
+    box-shadow: var(--glow-yellow);
+  }
+
+  .btn-secondary {
+    background: var(--surface-raised);
+    color: var(--foreground);
+    border: 1px solid var(--border);
+    padding: 0.625rem 1.25rem;
+    border-radius: var(--radius-md);
+  }
+  .btn-secondary:hover {
+    background: var(--surface-hover);
+    border-color: var(--border-hover);
+  }
+
+  .btn-danger {
+    background: var(--danger);
+    color: #fff;
+    font-weight: var(--weight-semibold);
+    padding: 0.625rem 1.25rem;
+    border-radius: var(--radius-md);
+  }
+  .btn-danger:hover {
+    background: #cc3338;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 0.625rem 1.25rem;
+    border-radius: var(--radius-md);
+  }
+  .btn-ghost:hover {
+    background: var(--surface);
+    color: var(--foreground);
+  }
+
+  /* Badges de estado de orden */
+  .badge-recibido   { background: rgba(107,138,170,0.15); color: var(--estado-recibido);   border: 1px solid rgba(107,138,170,0.3); border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: var(--text-small); font-weight: var(--weight-medium); }
+  .badge-en-proceso { background: rgba(255,195,0,0.12);  color: var(--estado-en-proceso); border: 1px solid rgba(255,195,0,0.3);  border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: var(--text-small); font-weight: var(--weight-medium); }
+  .badge-listo      { background: rgba(34,197,94,0.12);  color: var(--estado-listo);      border: 1px solid rgba(34,197,94,0.3);  border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: var(--text-small); font-weight: var(--weight-medium); }
+  .badge-entregado  { background: rgba(51,133,214,0.12); color: var(--estado-entregado);  border: 1px solid rgba(51,133,214,0.3); border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: var(--text-small); font-weight: var(--weight-medium); }
+  .badge-cancelado  { background: rgba(229,72,77,0.12);  color: var(--estado-cancelado);  border: 1px solid rgba(229,72,77,0.3);  border-radius: var(--radius-full); padding: 0.2rem 0.65rem; font-size: var(--text-small); font-weight: var(--weight-medium); }
+
+  /* Glassmorphism para navs y panels */
+  .glass-panel {
+    background: rgba(0, 29, 61, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .glass-nav {
+    background: rgba(0, 8, 20, 0.8);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Divider */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1rem 0;
+  }
+
+  /* Focus ring accesible */
+  .focus-ring:focus {
+    outline: 2px solid var(--yellow-500);
+    outline-offset: 2px;
+  }
+}

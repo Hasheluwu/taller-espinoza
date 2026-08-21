@@ -1,23 +1,34 @@
-import { useEffect, useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import Login     from './pages/Login'
+import Dashboard from './pages/Dashboard'
+import IngresarOrden from './pages/IngresarOrden'
+
+
+
+// Guarda de ruta — redirige a /login si no hay token
+function PrivateRoute({ children }) {
+  const token = localStorage.getItem('token')
+  return token ? children : <Navigate to="/login" replace />
+}
 
 export default function App() {
-  const [status, setStatus] = useState('Conectando...')
-
-  useEffect(() => {
-    fetch('http://localhost:3001/api/ping')
-      .then(r => r.json())
-      .then(d => setStatus(d.message))
-      .catch(() => setStatus('Error — backend no responde'))
-  }, [])
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white rounded-xl shadow p-10 text-center">
-        <h1 className="text-2xl font-semibold text-gray-800 mb-2">
-          Taller Pedro Espinoza
-        </h1>
-        <p className="text-gray-500">{status}</p>
-      </div>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/ordenes/nueva" element={
+          <PrivateRoute>
+            <IngresarOrden />
+          </PrivateRoute>
+        } />
+        <Route path="/login"     element={<Login />} />
+        <Route path="/dashboard" element={
+          <PrivateRoute>
+            <Dashboard />
+          </PrivateRoute>
+        } />
+        {/* Cualquier ruta desconocida → login */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
