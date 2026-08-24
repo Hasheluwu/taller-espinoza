@@ -17,6 +17,29 @@ app.use('/api/auth', authRoutes)
 const clientesRoutes = require('./routes/clientes')
 app.use('/api/clientes', clientesRoutes)
 
+const vehiculosRoutes = require('./routes/vehiculos')
+app.use('/api/vehiculos', vehiculosRoutes)
+
+const presupuestosRoutes = require('./routes/presupuestos')
+app.use('/api/presupuestos', presupuestosRoutes)
+
+
+
+
+const operacionesRoutes = require('./routes/operaciones')
+const pagosRoutes       = require('./routes/pagos')
+
+const ordenesRoutes = require('./routes/ordenes')
+app.use('/api/ordenes', ordenesRoutes)
+
+app.use('/api/operaciones', operacionesRoutes)
+app.use('/api/pagos',       pagosRoutes)
+
+
+const dashboardRoutes = require('./routes/dashboard')
+app.use('/api/dashboard', dashboardRoutes)
+
+
 app.get('/api/ping', (req, res) => {
   res.json({ message: 'Backend funcionando' })
 })
