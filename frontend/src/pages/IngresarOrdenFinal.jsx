@@ -37,9 +37,11 @@ export default function IngresarOrdenFinal() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const cliente    = location.state?.cliente    ?? null
-  const vehiculo   = location.state?.vehiculo   ?? null
-  const presupuesto = location.state?.presupuesto ?? null
+  const cliente      = location.state?.cliente      ?? null
+  const vehiculo     = location.state?.vehiculo     ?? null
+  const presupuesto  = location.state?.presupuesto  ?? null
+  const origenId     = location.state?.origenId     ?? null   // viene de Operaciones → daño oculto particular
+  const origenTipo   = location.state?.tipoDerivada ?? null   // 'dano_oculto' | 'garantia'
 
   // form fields
   const [tipo, setTipo]                             = useState('pintura')
@@ -58,14 +60,15 @@ export default function IngresarOrdenFinal() {
   const [obraExterna, setObraExterna]               = useState(false)
   const [obraInterna, setObraInterna]               = useState(false)
 
-  // orden derivada
-  const [esDerivada, setEsDerivada]                 = useState(false)
-  const [tipoDerivada, setTipoDerivada]             = useState('garantia') // 'garantia' | 'dano_oculto'
-  const [busquedaOrigenQ, setBusquedaOrigenQ]       = useState('')
+  // orden derivada — se pre-llena si viene desde Operaciones (daño oculto particular)
+  const [esDerivada, setEsDerivada]                 = useState(!!origenId)
+  const [tipoDerivada, setTipoDerivada]             = useState(origenTipo ?? 'garantia')
   const [ordenesOrigen, setOrdenesOrigen]           = useState([])
-  const [idOrdenOrigen, setIdOrdenOrigen]           = useState(null)
-  const [ordenOrigenSeleccionada, setOrdenOrigenSeleccionada] = useState(null)
-  const [buscandoOrigen, setBuscandoOrigen]         = useState(false)
+  const [idOrdenOrigen, setIdOrdenOrigen]           = useState(origenId ?? null)
+  const [ordenOrigenSeleccionada, setOrdenOrigenSeleccionada] = useState(
+    origenId ? { id: origenId, matricula: vehiculo?.matricula ?? '', tipo: '—', estado: '—' } : null
+  )
+  const [cargandoOrdenes, setCargandoOrdenes]       = useState(false)
 
   // submit
   const [creando, setCreando]   = useState(false)
@@ -82,28 +85,22 @@ export default function IngresarOrdenFinal() {
     }
   }, [])
 
-  // Buscar órdenes para id_orden_origen
+  // Cargar órdenes del mismo vehículo al activar "esta orden deriva de otra"
   useEffect(() => {
-    if (!esDerivada || busquedaOrigenQ.length < 2) {
+    if (!esDerivada || !vehiculo?.id) {
       setOrdenesOrigen([])
       return
     }
-    const t = setTimeout(async () => {
-      setBuscandoOrigen(true)
-      try {
-        const res = await fetch(
-          `${API}/api/ordenes?q=${encodeURIComponent(busquedaOrigenQ)}&solo_activas=false`,
-          { headers: { Authorization: `Bearer ${getToken()}` } }
-        )
-        if (res.ok) {
-          const data = await res.json()
-          setOrdenesOrigen(data.slice(0, 8))
-        }
-      } catch { /* silencioso */ }
-      finally { setBuscandoOrigen(false) }
-    }, 400)
-    return () => clearTimeout(t)
-  }, [busquedaOrigenQ, esDerivada])
+    setCargandoOrdenes(true)
+    fetch(
+      `${API}/api/ordenes/por-vehiculo/${vehiculo.id}`,
+      { headers: { Authorization: `Bearer ${getToken()}` } }
+    )
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setOrdenesOrigen(data))
+      .catch(() => setOrdenesOrigen([]))
+      .finally(() => setCargandoOrdenes(false))
+  }, [esDerivada])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -123,7 +120,7 @@ export default function IngresarOrdenFinal() {
     }
 
     // si es derivada por garantia → es_garantia = true
-    // si es derivada por dano_oculto → danos_ocultos se activa luego con la operación
+    // si es derivada por dano_oculto particular → danos_ocultos_inicial = true (se registra al crear)
     const payload = {
       id_vehiculo:             vehiculo.id,
       id_presupuesto:          presupuesto?.id ?? null,
@@ -136,6 +133,7 @@ export default function IngresarOrdenFinal() {
       fecha_vencimiento_garantia: esGarantia && fechaVencGarantia ? fechaVencGarantia : null,
       obra_externa:            obraExterna,
       obra_interna:            obraInterna,
+      danos_ocultos_inicial:   esDerivada && tipoDerivada === 'dano_oculto',
       numero_tramite:          esSeguro ? numeroTramite.trim() : null,
       numero_orden_seguro:     esSeguro ? numeroOrdenSeguro.trim() || null : null,
       monto_seguro:            esSeguro && montoSeguro ? parseFloat(montoSeguro) : null,
@@ -272,21 +270,33 @@ export default function IngresarOrdenFinal() {
           <div style={s.separador} />
           <div style={s.field}>
             <label style={s.label}><span style={s.accent}>Tipo de pago</span></label>
-            <div style={s.radioGroup}>
-              {['particular', 'lafise', 'iniser'].map(op => (
-                <label key={op} style={tipoPago === op ? s.radioBtnActivo : s.radioBtn}>
-                  <input
-                    type="radio"
-                    name="tipo_pago"
-                    value={op}
-                    checked={tipoPago === op}
-                    onChange={() => setTipoPago(op)}
-                    style={{ display: 'none' }}
-                  />
-                  {op.toUpperCase()}
+            {vehiculo.aseguradora === 'ninguna' ? (
+              <div style={s.radioGroup}>
+                <label style={s.radioBtnActivo}>
+                  <input type="radio" name="tipo_pago" value="particular" checked readOnly style={{ display: 'none' }} />
+                  PARTICULAR
                 </label>
-              ))}
-            </div>
+                <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)', alignSelf: 'center' }}>
+                  — vehículo sin aseguradora
+                </span>
+              </div>
+            ) : (
+              <div style={s.radioGroup}>
+                {['particular', vehiculo.aseguradora].map(op => (
+                  <label key={op} style={tipoPago === op ? s.radioBtnActivo : s.radioBtn}>
+                    <input
+                      type="radio"
+                      name="tipo_pago"
+                      value={op}
+                      checked={tipoPago === op}
+                      onChange={() => setTipoPago(op)}
+                      style={{ display: 'none' }}
+                    />
+                    {op.toUpperCase()}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* ── campos de seguro (condicional) ── */}
@@ -437,7 +447,7 @@ export default function IngresarOrdenFinal() {
                 if (!e.target.checked) {
                   setIdOrdenOrigen(null)
                   setOrdenOrigenSeleccionada(null)
-                  setBusquedaOrigenQ('')
+                  setOrdenesOrigen([])
                 }
               }}
               style={s.checkbox}
@@ -454,14 +464,14 @@ export default function IngresarOrdenFinal() {
                 <label style={tipoDerivada === 'garantia' ? s.radioBtnActivo : s.radioBtn}>
                   <input type="radio" name="tipo_derivada" value="garantia"
                     checked={tipoDerivada === 'garantia'}
-                    onChange={() => setTipoDerivada('garantia')}
+                    onChange={() => { setTipoDerivada('garantia'); setIdOrdenOrigen(null); setOrdenOrigenSeleccionada(null) }}
                     style={{ display: 'none' }} />
                   Por garantía
                 </label>
                 <label style={tipoDerivada === 'dano_oculto' ? s.radioBtnActivo : s.radioBtn}>
                   <input type="radio" name="tipo_derivada" value="dano_oculto"
                     checked={tipoDerivada === 'dano_oculto'}
-                    onChange={() => setTipoDerivada('dano_oculto')}
+                    onChange={() => { setTipoDerivada('dano_oculto'); setIdOrdenOrigen(null); setOrdenOrigenSeleccionada(null) }}
                     style={{ display: 'none' }} />
                   Por daño oculto (particular)
                 </label>
@@ -469,52 +479,63 @@ export default function IngresarOrdenFinal() {
 
               <div style={s.field}>
                 <label style={s.label}>
-                  <span style={s.accent}>Buscar orden de origen</span>
-                  <span style={s.opcional}> — por matrícula, nombre o cédula</span>
+                  <span style={s.accent}>Órdenes de este vehículo</span>
+                  <span style={s.opcional}> — {vehiculo.matricula}</span>
                 </label>
-                <input
-                  type="text"
-                  value={busquedaOrigenQ}
-                  onChange={e => {
-                    setBusquedaOrigenQ(e.target.value)
-                    setIdOrdenOrigen(null)
-                    setOrdenOrigenSeleccionada(null)
-                  }}
-                  placeholder="Ej: ABC-123 o Juan Pérez..."
-                  style={s.input}
-                  onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                  onBlur={e  => Object.assign(e.target.style, s.input)}
-                />
+
+                {cargandoOrdenes && <p style={s.buscando}>Cargando órdenes...</p>}
+
+                {!cargandoOrdenes && (() => {
+                  const filtradas = tipoDerivada === 'garantia'
+                    ? ordenesOrigen.filter(o => o.es_garantia)
+                    : ordenesOrigen
+                  if (filtradas.length === 0) return (
+                    <p style={s.buscando}>
+                      {tipoDerivada === 'garantia'
+                        ? 'No hay órdenes con garantía activa para este vehículo.'
+                        : 'No hay órdenes anteriores para este vehículo.'}
+                    </p>
+                  )
+                  return null
+                })()}
+
+                {!idOrdenOrigen && (() => {
+                  const filtradas = tipoDerivada === 'garantia'
+                    ? ordenesOrigen.filter(o => o.es_garantia)
+                    : ordenesOrigen
+                  if (filtradas.length === 0) return null
+                  return (
+                  <div style={s.listaOrigen}>
+                    {filtradas.map(o => (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() => {
+                          setIdOrdenOrigen(o.id)
+                          setOrdenOrigenSeleccionada(o)
+                        }}
+                        style={s.origenItem}
+                      >
+                        <span style={s.origenMatricula}>#{o.id} — {o.matricula}</span>
+                        <span style={s.origenMeta}>
+                          {o.tipo} · {o.estado} · {o.tipo_pago}
+                          {o.es_garantia ? ' · 🛡 garantía' : ''}
+                        </span>
+                        <span style={{ ...s.origenMeta, color: 'var(--neutral-400)' }}>
+                          Ingreso: {new Date(o.fecha_ingreso).toLocaleDateString('es-NI')}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  )
+                })()}
               </div>
-
-              {buscandoOrigen && <p style={s.buscando}>Buscando...</p>}
-
-              {ordenesOrigen.length > 0 && !idOrdenOrigen && (
-                <div style={s.listaOrigen}>
-                  {ordenesOrigen.map(o => (
-                    <button
-                      key={o.id}
-                      type="button"
-                      onClick={() => {
-                        setIdOrdenOrigen(o.id)
-                        setOrdenOrigenSeleccionada(o)
-                        setBusquedaOrigenQ('')
-                        setOrdenesOrigen([])
-                      }}
-                      style={s.origenItem}
-                    >
-                      <span style={s.origenMatricula}>{o.matricula}</span>
-                      <span style={s.origenMeta}>{o.nombre_cliente} — #{o.id} — {o.tipo} — {o.estado}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
 
               {ordenOrigenSeleccionada && (
                 <div style={s.origenConfirmado}>
                   <span style={s.origenConfirmadoLabel}>Orden origen seleccionada:</span>
                   <span style={s.origenMatricula}>#{ordenOrigenSeleccionada.id} — {ordenOrigenSeleccionada.matricula}</span>
-                  <span style={s.origenMeta}>{ordenOrigenSeleccionada.nombre_cliente} — {ordenOrigenSeleccionada.tipo}</span>
+                  <span style={s.origenMeta}>{ordenOrigenSeleccionada.tipo} · {ordenOrigenSeleccionada.estado}</span>
                   <button
                     type="button"
                     onClick={() => { setIdOrdenOrigen(null); setOrdenOrigenSeleccionada(null) }}

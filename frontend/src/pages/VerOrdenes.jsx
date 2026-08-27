@@ -307,7 +307,7 @@ export default function VerOrdenes() {
 
                   {/* solo activas */}
                   <div style={{ ...s.filtroGrupo, justifyContent: 'flex-end' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer', marginTop: '1.2rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
                       <input type="checkbox" checked={soloActivas} onChange={e => setSoloActivas(e.target.checked)} style={{ accentColor: 'var(--yellow-500)', width: '15px', height: '15px' }} />
                       <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-200)' }}>Solo activas</span>
                     </label>

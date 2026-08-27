@@ -59,6 +59,112 @@ function Alerta({ texto }) {
   return <p style={{ fontSize: 'var(--text-small)', color: 'var(--danger)', backgroundColor: 'rgba(229,72,77,0.08)', border: '1px solid rgba(229,72,77,0.2)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', margin: 0 }}>{texto}</p>
 }
 
+// ─── Banner de debug ──────────────────────────────────────────────────────────
+// Limpia todas las tablas y recarga el seed completo. Solo usar en desarrollo.
+function DebugResetBanner() {
+  const [estado, setEstado] = useState('idle') // idle | loading | ok | error
+  const [msg,    setMsg]    = useState('')
+
+  async function handleReset() {
+    const confirmar = window.confirm(
+      '⚠️  REINICIO DE BASE DE DATOS\n\n' +
+      'Esto borrará TODOS los datos actuales y cargará el seed de prueba.\n\n' +
+      '¿Continuar?'
+    )
+    if (!confirmar) return
+
+    setEstado('loading')
+    setMsg('')
+    try {
+      const res = await fetch(`${API}/api/debug/reset-db`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setEstado('ok')
+        setMsg('Base de datos reiniciada. Recargá la página para ver los datos frescos.')
+      } else {
+        setEstado('error')
+        setMsg(data.message || 'Error desconocido en el servidor.')
+      }
+    } catch (err) {
+      setEstado('error')
+      setMsg('No se pudo conectar con el backend.')
+    }
+  }
+
+  const colorBorde = estado === 'ok'    ? 'rgba(34,197,94,0.4)'
+                   : estado === 'error' ? 'rgba(229,72,77,0.4)'
+                   : 'rgba(255,195,0,0.25)'
+
+  const colorFondo = estado === 'ok'    ? 'rgba(34,197,94,0.06)'
+                   : estado === 'error' ? 'rgba(229,72,77,0.06)'
+                   : 'rgba(255,195,0,0.04)'
+
+  return (
+    <div style={{
+      border: `1px dashed ${colorBorde}`,
+      borderRadius: 'var(--radius-lg)',
+      backgroundColor: colorFondo,
+      padding: '0.85rem 1.25rem',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: '1rem',
+      flexWrap: 'wrap',
+    }}>
+      {/* Texto descriptivo */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+        <span style={{
+          fontSize: 'var(--text-xs)',
+          fontWeight: 'var(--weight-medium)',
+          color: 'var(--yellow-500)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.1em',
+        }}>
+          DEBUG — Solo desarrollo
+        </span>
+        <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)' }}>
+          Rellenar base de datos con datos inorgánicos de órdenes, clientes, vehículos, pagos y personal
+        </span>
+        {msg && (
+          <span style={{
+            fontSize: 'var(--text-xs)',
+            color: estado === 'ok' ? '#22c55e' : 'var(--danger)',
+            marginTop: '0.15rem',
+          }}>
+            {estado === 'ok' ? '✓ ' : '✗ '}{msg}
+          </span>
+        )}
+      </div>
+
+      {/* Botón */}
+      <button
+        onClick={handleReset}
+        disabled={estado === 'loading'}
+        style={{
+          backgroundColor: estado === 'loading' ? 'var(--surface-raised)' : 'rgba(255,195,0,0.12)',
+          color: estado === 'loading' ? 'var(--neutral-400)' : 'var(--yellow-400)',
+          border: `1px solid ${estado === 'loading' ? 'var(--border)' : 'rgba(255,195,0,0.35)'}`,
+          borderRadius: 'var(--radius-md)',
+          padding: '0.5rem 1rem',
+          fontSize: 'var(--text-small)',
+          fontWeight: 'var(--weight-medium)',
+          cursor: estado === 'loading' ? 'not-allowed' : 'pointer',
+          whiteSpace: 'nowrap',
+          transition: 'all 0.15s',
+          flexShrink: 0,
+        }}
+        onMouseEnter={e => { if (estado !== 'loading') e.currentTarget.style.backgroundColor = 'rgba(255,195,0,0.2)' }}
+        onMouseLeave={e => { if (estado !== 'loading') e.currentTarget.style.backgroundColor = 'rgba(255,195,0,0.12)' }}
+      >
+        {estado === 'loading' ? 'Reiniciando…' : '⟳  Rellenar'}
+      </button>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
 
@@ -91,6 +197,9 @@ export default function Dashboard() {
   return (
     <div style={s.page}>
       <div style={s.container}>
+
+        {/* ── DEBUG BANNER ───────────────────────────────────────────────── */}
+        <DebugResetBanner />
 
         {/* encabezado */}
         <div style={s.header}>

@@ -25,6 +25,8 @@ app.use('/api/presupuestos', presupuestosRoutes)
 
 
 
+const debugRouter = require('./routes/debug')
+app.use('/api/debug', debugRouter)
 
 const operacionesRoutes = require('./routes/operaciones')
 const pagosRoutes       = require('./routes/pagos')

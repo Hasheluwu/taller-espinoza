@@ -139,9 +139,25 @@ function Campo({ label, required, children }) {
   )
 }
 
+// ─── modal de confirmación genérico ──────────────────────────────────────────
+function ModalConfirmar({ titulo, mensaje, labelConfirmar = 'Eliminar', onConfirmar, onCancelar }) {
+  return (
+    <div style={s.overlay}>
+      <div style={{ ...s.modal, borderColor: 'rgba(229,72,77,0.35)', maxWidth: '420px' }}>
+        <p style={s.modalTitulo}>{titulo}</p>
+        <p style={s.modalTexto}>{mensaje}</p>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button onClick={onConfirmar} style={s.btnEliminar}>{labelConfirmar}</button>
+          <button onClick={onCancelar}  style={s.btnSecondary}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── formulario pago cliente ──────────────────────────────────────────────────
 function FormPagoCliente({ idOrden, orden, onPagoCreado }) {
-  const [form, setForm]     = useState({
+  const [form, setForm]       = useState({
     monto: '', fecha: new Date().toISOString().slice(0, 16),
     tipo: 'abono', metodo: 'efectivo', numero_recibo: '',
   })
@@ -227,7 +243,7 @@ function FormPagoCliente({ idOrden, orden, onPagoCreado }) {
 
 // ─── formulario pago seguro ───────────────────────────────────────────────────
 function FormPagoSeguro({ idOrden, tipoPago, onPagoCreado }) {
-  const [form, setForm]     = useState({
+  const [form, setForm]       = useState({
     monto: '', fecha_esperada: '', fecha_recibido: '',
     estado: 'pendiente', referencia_bancaria: '', concepto: 'pago_principal',
   })
@@ -316,33 +332,50 @@ function FormPagoSeguro({ idOrden, tipoPago, onPagoCreado }) {
 
 // ─── lista pagos cliente ──────────────────────────────────────────────────────
 function ListaPagosCliente({ pagos, orden, onEliminar }) {
+  const [confirmandoId, setConfirmandoId] = useState(null)
+
   if (pagos.length === 0) return <p style={s.vacio}>Sin pagos registrados.</p>
+
+  const pagoConfirmando = pagos.find(p => p.id === confirmandoId)
+
   return (
-    <div style={s.listaPagos}>
-      {pagos.map(p => (
-        <div key={p.id} style={s.filaPago}>
-          <div style={s.filaPagoIzq}>
-            <span style={s.pagoMonto}>C$ {fmt(p.monto)}</span>
-            <span style={s.pagoMeta}>{fmtFechaHora(p.fecha)}</span>
+    <>
+      {confirmandoId !== null && pagoConfirmando && (
+        <ModalConfirmar
+          titulo="Eliminar pago"
+          mensaje={`¿Eliminar el pago de C$ ${fmt(pagoConfirmando.monto)} (${pagoConfirmando.tipo})? Esta acción no se puede deshacer.`}
+          labelConfirmar="Sí, eliminar"
+          onConfirmar={() => { onEliminar(confirmandoId); setConfirmandoId(null) }}
+          onCancelar={() => setConfirmandoId(null)}
+        />
+      )}
+      <div style={s.listaPagos}>
+        {pagos.map(p => (
+          <div key={p.id} style={s.filaPago}>
+            <div style={s.filaPagoIzq}>
+              <span style={s.pagoMonto}>C$ {fmt(p.monto)}</span>
+              <span style={s.pagoMeta}>{fmtFechaHora(p.fecha)}</span>
+            </div>
+            <div style={s.filaPagoDer}>
+              <Badge texto={p.tipo} />
+              <span style={s.pagoMetodo}>{p.metodo}</span>
+              {p.numero_recibo && <span style={s.pagoRecibo}>#{p.numero_recibo}</span>}
+              <button onClick={() => generarReciboPDF({ pago: p, orden })} style={s.btnPDF} title="Imprimir recibo">PDF</button>
+              <button onClick={() => setConfirmandoId(p.id)} style={s.btnX} title="Eliminar pago">✕</button>
+            </div>
           </div>
-          <div style={s.filaPagoDer}>
-            <Badge texto={p.tipo} />
-            <span style={s.pagoMetodo}>{p.metodo}</span>
-            {p.numero_recibo && <span style={s.pagoRecibo}>#{p.numero_recibo}</span>}
-            <button onClick={() => generarReciboPDF({ pago: p, orden })} style={s.btnPDF} title="Imprimir recibo">PDF</button>
-            <button onClick={() => onEliminar(p.id)} style={s.btnX} title="Eliminar pago">✕</button>
-          </div>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   )
 }
 
 // ─── lista pagos seguro ───────────────────────────────────────────────────────
 function ListaPagosSeguro({ pagos, onActualizar, onEliminar }) {
-  const [editandoId, setEditandoId] = useState(null)
-  const [formEdit, setFormEdit]     = useState({ fecha_recibido: '', referencia_bancaria: '' })
-  const [guardando, setGuardando]   = useState(false)
+  const [editandoId, setEditandoId]     = useState(null)
+  const [formEdit, setFormEdit]         = useState({ fecha_recibido: '', referencia_bancaria: '' })
+  const [guardando, setGuardando]       = useState(false)
+  const [confirmandoId, setConfirmandoId] = useState(null)
 
   async function marcarRecibido(pago) {
     setEditandoId(pago.id)
@@ -364,48 +397,61 @@ function ListaPagosSeguro({ pagos, onActualizar, onEliminar }) {
 
   if (pagos.length === 0) return <p style={s.vacio}>Sin cobros registrados al seguro.</p>
 
+  const pagoConfirmando = pagos.find(p => p.id === confirmandoId)
+
   return (
-    <div style={s.listaPagos}>
-      {pagos.map(p => (
-        <div key={p.id} style={{ ...s.filaPago, flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-            <div style={s.filaPagoIzq}>
-              <span style={s.pagoMonto}>C$ {fmt(p.monto)}</span>
-              <span style={s.pagoMeta}>
-                {p.concepto?.replace('_', ' ')}
-                {p.referencia_bancaria ? ` · Ref: ${p.referencia_bancaria}` : ''}
-              </span>
-              <span style={s.pagoMeta}>
-                {p.fecha_esperada ? `Esperado: ${fmtFecha(p.fecha_esperada)}` : ''}
-                {p.fecha_recibido ? ` · Recibido: ${fmtFecha(p.fecha_recibido)}` : ''}
-              </span>
+    <>
+      {confirmandoId !== null && pagoConfirmando && (
+        <ModalConfirmar
+          titulo="Eliminar cobro al seguro"
+          mensaje={`¿Eliminar el cobro de C$ ${fmt(pagoConfirmando.monto)} (${pagoConfirmando.concepto?.replace('_', ' ')})? Esta acción no se puede deshacer.`}
+          labelConfirmar="Sí, eliminar"
+          onConfirmar={() => { onEliminar(confirmandoId); setConfirmandoId(null) }}
+          onCancelar={() => setConfirmandoId(null)}
+        />
+      )}
+      <div style={s.listaPagos}>
+        {pagos.map(p => (
+          <div key={p.id} style={{ ...s.filaPago, flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+              <div style={s.filaPagoIzq}>
+                <span style={s.pagoMonto}>C$ {fmt(p.monto)}</span>
+                <span style={s.pagoMeta}>
+                  {p.concepto?.replace('_', ' ')}
+                  {p.referencia_bancaria ? ` · Ref: ${p.referencia_bancaria}` : ''}
+                </span>
+                <span style={s.pagoMeta}>
+                  {p.fecha_esperada ? `Esperado: ${fmtFecha(p.fecha_esperada)}` : ''}
+                  {p.fecha_recibido ? ` · Recibido: ${fmtFecha(p.fecha_recibido)}` : ''}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Badge texto={p.estado} />
+                {p.estado === 'pendiente' && (
+                  <button onClick={() => marcarRecibido(p)} style={s.btnRecibido}>Marcar recibido</button>
+                )}
+                <button onClick={() => setConfirmandoId(p.id)} style={s.btnX}>✕</button>
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Badge texto={p.estado} />
-              {p.estado === 'pendiente' && (
-                <button onClick={() => marcarRecibido(p)} style={s.btnRecibido}>Marcar recibido</button>
-              )}
-              <button onClick={() => onEliminar(p.id)} style={s.btnX}>✕</button>
-            </div>
+            {editandoId === p.id && (
+              <div style={s.editSeguro}>
+                <input type="date" value={formEdit.fecha_recibido}
+                  onChange={e => setFormEdit(f => ({ ...f, fecha_recibido: e.target.value }))}
+                  style={{ ...s.input, colorScheme: 'dark', width: 'auto' }} />
+                <input type="text" placeholder="Referencia bancaria (opcional)"
+                  value={formEdit.referencia_bancaria}
+                  onChange={e => setFormEdit(f => ({ ...f, referencia_bancaria: e.target.value }))}
+                  style={{ ...s.input, flex: 1 }} />
+                <button onClick={() => confirmarRecibido(p.id)} disabled={guardando} style={s.btnConfirmar}>
+                  {guardando ? '...' : 'Confirmar'}
+                </button>
+                <button onClick={() => setEditandoId(null)} style={s.btnCancelar}>Cancelar</button>
+              </div>
+            )}
           </div>
-          {editandoId === p.id && (
-            <div style={s.editSeguro}>
-              <input type="date" value={formEdit.fecha_recibido}
-                onChange={e => setFormEdit(f => ({ ...f, fecha_recibido: e.target.value }))}
-                style={{ ...s.input, colorScheme: 'dark', width: 'auto' }} />
-              <input type="text" placeholder="Referencia bancaria (opcional)"
-                value={formEdit.referencia_bancaria}
-                onChange={e => setFormEdit(f => ({ ...f, referencia_bancaria: e.target.value }))}
-                style={{ ...s.input, flex: 1 }} />
-              <button onClick={() => confirmarRecibido(p.id)} disabled={guardando} style={s.btnConfirmar}>
-                {guardando ? '...' : 'Confirmar'}
-              </button>
-              <button onClick={() => setEditandoId(null)} style={s.btnCancelar}>Cancelar</button>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -506,9 +552,9 @@ export default function Pagos() {
 
   function handleActualizarSeguro(pagoActualizado) {
     setResumen(prev => {
-      const anterior    = prev.pagos_seguro.find(p => p.id === pagoActualizado.id)
+      const anterior     = prev.pagos_seguro.find(p => p.id === pagoActualizado.id)
       const eraPendiente = anterior?.estado === 'pendiente'
-      const monto       = parseFloat(pagoActualizado.monto)
+      const monto        = parseFloat(pagoActualizado.monto)
       return {
         ...prev,
         pagos_seguro:     prev.pagos_seguro.map(p => p.id === pagoActualizado.id ? pagoActualizado : p),
@@ -521,7 +567,17 @@ export default function Pagos() {
 
   async function handleEliminarPagoCliente(idPago) {
     const pago = resumen?.pagos_cliente?.find(p => p.id === idPago)
-    await fetch(`${API}/api/pagos/cliente/${idPago}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
+    const res  = await fetch(`${API}/api/pagos/cliente/${idPago}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      // El backend puede devolver 400 si la orden ya está entregada/cancelada.
+      // Recargamos para que el estado local quede sincronizado.
+      alert(data.message || 'No se pudo eliminar el pago.')
+      return
+    }
     setResumen(prev => ({
       ...prev,
       pagos_cliente: prev.pagos_cliente.filter(p => p.id !== idPago),
@@ -532,9 +588,17 @@ export default function Pagos() {
 
   async function handleEliminarPagoSeguro(idPago) {
     const pago = resumen?.pagos_seguro?.find(p => p.id === idPago)
-    await fetch(`${API}/api/pagos/seguro/${idPago}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
+    const res  = await fetch(`${API}/api/pagos/seguro/${idPago}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      alert(data.message || 'No se pudo eliminar el cobro.')
+      return
+    }
     const eraPendiente = pago?.estado === 'pendiente'
-    const monto = parseFloat(pago?.monto || 0)
+    const monto        = parseFloat(pago?.monto || 0)
     setResumen(prev => ({
       ...prev,
       pagos_seguro:     prev.pagos_seguro.filter(p => p.id !== idPago),
@@ -692,6 +756,7 @@ const s = {
   btnConfirmar:      { backgroundColor: '#22c55e', color: '#000', fontSize: 'var(--text-small)', fontWeight: 'var(--weight-bold)', padding: '0.45rem 0.875rem', border: 'none', borderRadius: 'var(--radius-md)', cursor: 'pointer' },
   btnCancelar:       { backgroundColor: 'transparent', color: 'var(--neutral-400)', fontSize: 'var(--text-small)', padding: '0.45rem 0.6rem', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', cursor: 'pointer' },
   btnEntrega:        { backgroundColor: '#22c55e', color: '#000', fontWeight: 'var(--weight-bold)', fontSize: 'var(--text-body)', padding: '0.7rem 1.25rem', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer' },
+  btnEliminar:       { backgroundColor: 'var(--danger)', color: '#fff', fontWeight: 'var(--weight-bold)', fontSize: 'var(--text-body)', padding: '0.7rem 1.25rem', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer' },
   err:               { fontSize: 'var(--text-small)', color: 'var(--danger)', backgroundColor: 'var(--danger-bg)', border: '1px solid rgba(229,72,77,0.25)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', margin: 0 },
   vacio:             { fontSize: 'var(--text-small)', color: 'var(--neutral-400)', margin: 0, fontStyle: 'italic' },
   overlay:           { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },

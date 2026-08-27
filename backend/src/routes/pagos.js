@@ -5,6 +5,9 @@ const requireAuth = require('../middleware/authMiddleware')
 
 const router = express.Router()
 
+// Estados en los que aún se puede modificar una orden
+const ESTADOS_EDITABLES = ['recibido', 'en_proceso']
+
 // ═══════════════════════════════════════════════════════════
 // RESUMEN DE PAGOS DE UNA ORDEN
 // GET /api/pagos/:id_orden/resumen
@@ -58,7 +61,7 @@ router.post('/:id_orden/cliente', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'Faltan campos obligatorios: monto, tipo, método.' })
   }
 
-  const tiposValidos  = ['adelanto', 'abono', 'saldo']
+  const tiposValidos   = ['adelanto', 'abono', 'saldo']
   const metodosValidos = ['efectivo', 'transferencia', 'otro']
   if (!tiposValidos.includes(tipo))     return res.status(400).json({ message: 'Tipo de pago inválido.' })
   if (!metodosValidos.includes(metodo)) return res.status(400).json({ message: 'Método de pago inválido.' })
@@ -103,23 +106,58 @@ router.post('/:id_orden/cliente', requireAuth, async (req, res) => {
   }
 })
 
+// ───────────────────────────────────────────────────────────
 // DELETE /api/pagos/cliente/:id
+// Verifica existencia y que la orden aún sea editable.
+// ───────────────────────────────────────────────────────────
 router.delete('/cliente/:id', requireAuth, async (req, res) => {
+  const conn = await pool.getConnection()
   try {
-    const [rows] = await pool.query('SELECT * FROM pago_cliente WHERE id = ?', [req.params.id])
-    if (rows.length === 0) return res.status(404).json({ message: 'Pago no encontrado.' })
+    await conn.beginTransaction()
 
-    await pool.query('DELETE FROM pago_cliente WHERE id = ?', [req.params.id])
+    // 1. Verificar que el pago existe
+    const [rows] = await conn.query(
+      'SELECT pc.*, o.estado AS estado_orden FROM pago_cliente pc JOIN orden o ON o.id = pc.id_orden WHERE pc.id = ?',
+      [req.params.id]
+    )
+    if (rows.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ message: 'Pago no encontrado.' })
+    }
+
+    // 2. Verificar que la orden todavía permite modificaciones
+    const pago = rows[0]
+    if (!ESTADOS_EDITABLES.includes(pago.estado_orden)) {
+      await conn.rollback()
+      return res.status(400).json({
+        message: `No se puede eliminar el pago porque la orden está en estado "${pago.estado_orden}".`,
+      })
+    }
+
+    // 3. Eliminar
+    await conn.query('DELETE FROM pago_cliente WHERE id = ?', [req.params.id])
+
+    await conn.query(
+      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
+       VALUES (?, 'pago_cliente', ?, 'eliminar', ?)`,
+      [req.usuario.id, req.params.id, `Pago eliminado de orden #${pago.id_orden} — monto C$ ${pago.monto}`]
+    )
+
+    await conn.commit()
     res.json({ message: 'Pago eliminado.' })
   } catch (err) {
+    await conn.rollback()
     console.error(err)
     res.status(500).json({ message: 'Error interno del servidor.' })
+  } finally {
+    conn.release()
   }
 })
 
 // ═══════════════════════════════════════════════════════════
 // PAGOS DE ASEGURADORA
 // POST /api/pagos/:id_orden/seguro
+// Igual que pago_cliente: transacción + auditoría.
 // ═══════════════════════════════════════════════════════════
 router.post('/:id_orden/seguro', requireAuth, async (req, res) => {
   const { id_orden } = req.params
@@ -129,56 +167,142 @@ router.post('/:id_orden/seguro', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'Faltan campos obligatorios: monto, concepto.' })
   }
 
+  const conceptosValidos = ['pago_principal', 'dano_oculto', 'otro']
+  const estadosValidos   = ['pendiente', 'recibido']
+  if (!conceptosValidos.includes(concepto))             return res.status(400).json({ message: 'Concepto inválido.' })
+  if (estado && !estadosValidos.includes(estado))       return res.status(400).json({ message: 'Estado inválido.' })
+
+  const conn = await pool.getConnection()
   try {
-    const [result] = await pool.query(
+    await conn.beginTransaction()
+
+    const [result] = await conn.query(
       `INSERT INTO pago_seguro (id_orden, monto, fecha_esperada, fecha_recibido, estado, referencia_bancaria, concepto)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         id_orden,
         parseFloat(monto),
-        fecha_esperada    || null,
-        fecha_recibido    || null,
-        estado            || 'pendiente',
+        fecha_esperada         || null,
+        fecha_recibido         || null,
+        estado                 || 'pendiente',
         referencia_bancaria?.trim() || null,
         concepto,
       ]
     )
-    const [nuevo] = await pool.query('SELECT * FROM pago_seguro WHERE id = ?', [result.insertId])
+
+    await conn.query(
+      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
+       VALUES (?, 'pago_seguro', ?, 'crear', ?)`,
+      [
+        req.usuario.id,
+        result.insertId,
+        `Cobro al seguro registrado — C$ ${monto} — concepto: ${concepto} — estado: ${estado || 'pendiente'}`,
+      ]
+    )
+
+    await conn.commit()
+
+    const [nuevo] = await conn.query('SELECT * FROM pago_seguro WHERE id = ?', [result.insertId])
     res.status(201).json(nuevo[0])
   } catch (err) {
+    await conn.rollback()
     console.error('Error al registrar pago de seguro:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
+  } finally {
+    conn.release()
   }
 })
 
+// ───────────────────────────────────────────────────────────
 // PATCH /api/pagos/seguro/:id/estado — marcar como recibido
+// Verifica existencia antes de actualizar.
+// ───────────────────────────────────────────────────────────
 router.patch('/seguro/:id/estado', requireAuth, async (req, res) => {
   const { estado, fecha_recibido, referencia_bancaria } = req.body
+
   if (!['pendiente', 'recibido'].includes(estado)) {
     return res.status(400).json({ message: 'Estado inválido.' })
   }
+
+  const conn = await pool.getConnection()
   try {
-    await pool.query(
+    await conn.beginTransaction()
+
+    // 1. Verificar existencia primero
+    const [rows] = await conn.query('SELECT * FROM pago_seguro WHERE id = ?', [req.params.id])
+    if (rows.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ message: 'Pago de seguro no encontrado.' })
+    }
+
+    // 2. Actualizar
+    await conn.query(
       'UPDATE pago_seguro SET estado = ?, fecha_recibido = ?, referencia_bancaria = ? WHERE id = ?',
       [estado, fecha_recibido || null, referencia_bancaria || null, req.params.id]
     )
-    const [updated] = await pool.query('SELECT * FROM pago_seguro WHERE id = ?', [req.params.id])
-    if (updated.length === 0) return res.status(404).json({ message: 'Pago no encontrado.' })
+
+    await conn.query(
+      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
+       VALUES (?, 'pago_seguro', ?, 'cambio_estado', ?)`,
+      [
+        req.usuario.id,
+        req.params.id,
+        `Estado actualizado a "${estado}"${referencia_bancaria ? ` — ref: ${referencia_bancaria}` : ''}`,
+      ]
+    )
+
+    await conn.commit()
+
+    const [updated] = await conn.query('SELECT * FROM pago_seguro WHERE id = ?', [req.params.id])
     res.json(updated[0])
   } catch (err) {
+    await conn.rollback()
     console.error(err)
     res.status(500).json({ message: 'Error interno del servidor.' })
+  } finally {
+    conn.release()
   }
 })
 
+// ───────────────────────────────────────────────────────────
 // DELETE /api/pagos/seguro/:id
+// Verifica existencia antes de borrar.
+// ───────────────────────────────────────────────────────────
 router.delete('/seguro/:id', requireAuth, async (req, res) => {
+  const conn = await pool.getConnection()
   try {
-    await pool.query('DELETE FROM pago_seguro WHERE id = ?', [req.params.id])
+    await conn.beginTransaction()
+
+    // 1. Verificar existencia
+    const [rows] = await conn.query('SELECT * FROM pago_seguro WHERE id = ?', [req.params.id])
+    if (rows.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ message: 'Pago de seguro no encontrado.' })
+    }
+
+    const pago = rows[0]
+
+    // 2. Eliminar
+    await conn.query('DELETE FROM pago_seguro WHERE id = ?', [req.params.id])
+
+    await conn.query(
+      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
+       VALUES (?, 'pago_seguro', ?, 'eliminar', ?)`,
+      [
+        req.usuario.id,
+        req.params.id,
+        `Cobro al seguro eliminado — C$ ${pago.monto} — concepto: ${pago.concepto}`,
+      ]
+    )
+
+    await conn.commit()
     res.json({ message: 'Pago de seguro eliminado.' })
   } catch (err) {
+    await conn.rollback()
     console.error(err)
     res.status(500).json({ message: 'Error interno del servidor.' })
+  } finally {
+    conn.release()
   }
 })
 

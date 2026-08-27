@@ -607,12 +607,44 @@ function SeccionDanos({ idOrden, tipoPago, onOperacionHecha, navigate }) {
     finally { setCreando(false) }
   }
 
+  const [navegando, setNavegando] = useState(false)
+  const [errorNav, setErrorNav]   = useState('')
+
+  async function irAOrdenDerivada() {
+    setNavegando(true)
+    setErrorNav('')
+    try {
+      const res = await fetch(`${API}/api/ordenes/${idOrden}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      if (!res.ok) throw new Error('No se pudo cargar la orden.')
+      const orden = await res.json()
+
+      const cliente  = { id: orden.id_cliente,  nombre: orden.nombre_cliente, cedula: orden.cedula, telefono: orden.telefono }
+      const vehiculo = { id: orden.id_vehiculo, matricula: orden.matricula, marca: orden.marca, modelo: orden.modelo, anio_fabricacion: orden.anio_fabricacion, aseguradora: orden.aseguradora_vehiculo ?? 'ninguna', color: orden.color }
+
+      navigate('/ordenes/nueva/orden', {
+        state: {
+          cliente,
+          vehiculo,
+          presupuesto: null,
+          origenId:    parseInt(idOrden),
+          tipoDerivada: 'dano_oculto',
+        },
+      })
+    } catch (err) {
+      setErrorNav(err.message)
+      setNavegando(false)
+    }
+  }
+
   if (!esSeguro) {
     return (
       <div style={s.seccionInterna}>
-        <p style={s.label}>Esta orden es de cliente particular. Un daño oculto se tramita como una orden nueva vinculada.</p>
-        <button onClick={() => navigate(`/ordenes/nueva?origen=${idOrden}`)} style={s.btnPrimary}>
-          Crear orden derivada de daño oculto →
+        <p style={s.label}>Esta orden es de cliente particular. Un daño oculto se tramita como una orden nueva vinculada a este mismo vehículo.</p>
+        {errorNav && <p style={s.err}>{errorNav}</p>}
+        <button onClick={irAOrdenDerivada} disabled={navegando} style={navegando ? s.btnDisabled : s.btnPrimary}>
+          {navegando ? 'Cargando...' : 'Crear orden derivada de daño oculto →'}
         </button>
       </div>
     )
@@ -711,22 +743,40 @@ export default function Operaciones() {
   const { id } = useParams()
   const navigate = useNavigate()
 
-  const [orden, setOrden]           = useState(null)
-  const [loading, setLoading]       = useState(true)
-  const [seccionAbierta, setSeccion] = useState(null)
+  const [orden, setOrden]               = useState(null)
+  const [totales, setTotales]           = useState(null)
+  const [loading, setLoading]           = useState(true)
+  const [seccionAbierta, setSeccion]    = useState(null)
   const [mostrarModalPago, setModalPago] = useState(false)
 
   useEffect(() => {
     async function cargar() {
-      const res = await fetch(`${API}/api/ordenes/${id}`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      const headers = { Authorization: `Bearer ${getToken()}` }
+      const res = await fetch(`${API}/api/ordenes/${id}`, { headers })
       if (res.ok) setOrden(await res.json())
+
+      // recalcular totales al entrar — sincroniza datos inorgánicos o desactualizados
+      const rTotales = await fetch(`${API}/api/operaciones/${id}/recalcular`, {
+        method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
+      })
+      if (rTotales.ok) setTotales(await rTotales.json())
+
       setLoading(false)
     }
     cargar()
   }, [id])
 
+  function actualizarTotales() {
+    fetch(`${API}/api/operaciones/${id}/recalcular`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setTotales(data) })
+  }
+
   function toggle(nombre) { setSeccion(prev => prev === nombre ? null : nombre) }
-  function operacionHecha() { setModalPago(true) }
+  function operacionHecha() { setModalPago(true); actualizarTotales() }
 
   if (loading) return <div style={s.page}><p style={{ color: 'var(--neutral-300)', padding: '2rem' }}>Cargando orden...</p></div>
   if (!orden)  return <div style={s.page}><p style={{ color: 'var(--danger)', padding: '2rem' }}>Orden no encontrada.</p></div>
@@ -747,6 +797,28 @@ export default function Operaciones() {
         </div>
 
         <EncabezadoOrden orden={orden} />
+
+        {/* ── card de totales ── */}
+        {totales && (
+          <div style={s.totalesCard}>
+            <div style={s.totalesItem}>
+              <span style={s.totalesLabel}>Subtotal</span>
+              <span style={s.totalesValor}>C$ {fmt(totales.subtotal)}</span>
+            </div>
+            <div style={s.totalesSep} />
+            <div style={s.totalesItem}>
+              <span style={s.totalesLabel}>IVA (15%)</span>
+              <span style={s.totalesValor}>C$ {fmt(totales.iva)}</span>
+            </div>
+            <div style={s.totalesSep} />
+            <div style={s.totalesItem}>
+              <span style={s.totalesLabel}>Total</span>
+              <span style={{ ...s.totalesValor, color: 'var(--yellow-400)', fontSize: 'var(--text-body-lg)' }}>
+                C$ {fmt(totales.costo_total)}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <Seccion titulo="Servicios / Líneas de cobro" abierta={seccionAbierta === 'servicios'} onToggle={() => toggle('servicios')}>
@@ -823,6 +895,11 @@ const s = {
   btnX:             { backgroundColor: 'transparent', color: 'var(--danger)', border: 'none', cursor: 'pointer', fontSize: '0.8rem', padding: '0.2rem 0.4rem', borderRadius: 'var(--radius-sm)', flexShrink: 0 },
   err:              { fontSize: 'var(--text-small)', color: 'var(--danger)', backgroundColor: 'var(--danger-bg)', border: '1px solid rgba(229,72,77,0.25)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', margin: 0 },
   vacio:            { fontSize: 'var(--text-small)', color: 'var(--neutral-400)', margin: 0, fontStyle: 'italic' },
+  totalesCard:      { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', gap: '2rem', flexWrap: 'wrap' },
+  totalesItem:      { display: 'flex', flexDirection: 'column', gap: '0.15rem' },
+  totalesLabel:     { fontSize: 'var(--text-xs)', color: 'var(--neutral-300)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 'var(--weight-medium)' },
+  totalesValor:     { fontSize: 'var(--text-body)', color: 'var(--foreground)', fontWeight: 'var(--weight-bold)' },
+  totalesSep:       { width: '1px', height: '32px', backgroundColor: 'var(--border)', flexShrink: 0 },
   overlay:          { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
   modal:            { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '2.5rem', maxWidth: '440px', width: '90%', display: 'flex', flexDirection: 'column', gap: '1.25rem' },
   modalTitulo:      { fontSize: 'var(--text-body-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--foreground)', margin: 0 },

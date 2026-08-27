@@ -6,6 +6,79 @@ const requireAuth = require('../middleware/authMiddleware')
 const router = express.Router()
 
 // ═══════════════════════════════════════════════════════════
+// RECÁLCULO DE TOTALES DE LA ORDEN
+// Suma servicios + materiales + repuestos y actualiza
+// subtotal, iva y costo_total en la tabla orden.
+// Se llama internamente después de cada write y también
+// está expuesto como POST para el recálculo al cargar la página.
+// ═══════════════════════════════════════════════════════════
+
+async function recalcularTotalesOrden(conn, id_orden) {
+  // servicios — precio con o sin IVA (15%)
+  const [servicios] = await conn.query(
+    `SELECT precio, aplica_iva FROM orden_servicio WHERE id_orden = ?`,
+    [id_orden]
+  )
+
+  // materiales — precio snapshot × cantidad
+  const [materiales] = await conn.query(
+    `SELECT precio_unitario, cantidad_usada FROM orden_material WHERE id_orden = ?`,
+    [id_orden]
+  )
+
+  // repuestos — precio snapshot × cantidad
+  const [repuestos] = await conn.query(
+    `SELECT precio_unitario, cantidad_usada FROM orden_repuesto WHERE id_orden = ?`,
+    [id_orden]
+  )
+
+  let subtotal = 0
+  let iva      = 0
+
+  for (const s of servicios) {
+    const base = parseFloat(s.precio)
+    subtotal += base
+    if (s.aplica_iva) iva += base * 0.15
+  }
+
+  for (const m of materiales) {
+    subtotal += parseFloat(m.precio_unitario) * parseFloat(m.cantidad_usada)
+    // materiales no generan IVA en la orden (ya se capturó en la compra)
+  }
+
+  for (const r of repuestos) {
+    subtotal += parseFloat(r.precio_unitario) * parseInt(r.cantidad_usada)
+  }
+
+  const costo_total = subtotal + iva
+
+  await conn.query(
+    `UPDATE orden SET subtotal = ?, iva = ?, costo_total = ? WHERE id = ?`,
+    [subtotal, iva, costo_total, id_orden]
+  )
+
+  return { subtotal, iva, costo_total }
+}
+
+// POST /api/operaciones/:id_orden/recalcular
+// Llamado por el frontend al montar la página de Operaciones.
+router.post('/:id_orden/recalcular', requireAuth, async (req, res) => {
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const totales = await recalcularTotalesOrden(conn, req.params.id_orden)
+    await conn.commit()
+    res.json(totales)
+  } catch (err) {
+    await conn.rollback()
+    console.error('Error al recalcular totales:', err)
+    res.status(500).json({ message: 'Error interno.' })
+  } finally {
+    conn.release()
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
 // ORDEN_SERVICIO
 // ═══════════════════════════════════════════════════════════
 
@@ -28,27 +101,64 @@ router.post('/:id_orden/servicios', requireAuth, async (req, res) => {
   const { descripcion, precio, aplica_iva } = req.body
   if (!descripcion || precio === undefined)
     return res.status(400).json({ message: 'Faltan campos obligatorios.' })
+  const conn = await pool.getConnection()
   try {
-    const [result] = await pool.query(
+    await conn.beginTransaction()
+    const [result] = await conn.query(
       'INSERT INTO orden_servicio (id_orden, descripcion, precio, aplica_iva) VALUES (?, ?, ?, ?)',
       [req.params.id_orden, descripcion.trim(), parseFloat(precio), aplica_iva ? 1 : 0]
     )
-    const [nuevo] = await pool.query('SELECT * FROM orden_servicio WHERE id = ?', [result.insertId])
+    const [nuevo] = await conn.query('SELECT * FROM orden_servicio WHERE id = ?', [result.insertId])
+    await recalcularTotalesOrden(conn, req.params.id_orden)
+    await conn.commit()
     res.status(201).json(nuevo[0])
   } catch (err) {
+    await conn.rollback()
     console.error(err)
     res.status(500).json({ message: 'Error interno.' })
+  } finally {
+    conn.release()
   }
 })
 
 // DELETE /api/operaciones/servicios/:id
 router.delete('/servicios/:id', requireAuth, async (req, res) => {
+  const conn = await pool.getConnection()
   try {
-    await pool.query('DELETE FROM orden_servicio WHERE id = ?', [req.params.id])
+    await conn.beginTransaction()
+    // obtener id_orden antes de borrar
+    const [rows] = await conn.query(
+      'SELECT id_orden FROM orden_servicio WHERE id = ?',
+      [req.params.id]
+    )
+    if (rows.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ message: 'Servicio no encontrado.' })
+    }
+    const id_orden = rows[0].id_orden
+
+    // verificar estado de la orden — solo permitir en recibido o en_proceso
+    const [orden] = await conn.query(
+      'SELECT estado FROM orden WHERE id = ?',
+      [id_orden]
+    )
+    if (!['recibido', 'en_proceso'].includes(orden[0].estado)) {
+      await conn.rollback()
+      return res.status(400).json({
+        message: `No se puede eliminar una línea en una orden con estado "${orden[0].estado}".`,
+      })
+    }
+
+    await conn.query('DELETE FROM orden_servicio WHERE id = ?', [req.params.id])
+    await recalcularTotalesOrden(conn, id_orden)
+    await conn.commit()
     res.json({ message: 'Servicio eliminado.' })
   } catch (err) {
+    await conn.rollback()
     console.error(err)
     res.status(500).json({ message: 'Error interno.' })
+  } finally {
+    conn.release()
   }
 })
 
@@ -220,6 +330,7 @@ router.post('/:id_orden/materiales', requireAuth, async (req, res) => {
       [parseFloat(cantidad_usada), id_material]
     )
 
+    await recalcularTotalesOrden(conn, req.params.id_orden)
     await conn.commit()
 
     const [nuevo] = await conn.query(
@@ -240,12 +351,59 @@ router.post('/:id_orden/materiales', requireAuth, async (req, res) => {
 
 // DELETE /api/operaciones/materiales/:id
 router.delete('/materiales/:id', requireAuth, async (req, res) => {
+  const conn = await pool.getConnection()
   try {
-    await pool.query('DELETE FROM orden_material WHERE id = ?', [req.params.id])
-    res.json({ message: 'Material eliminado.' })
+    await conn.beginTransaction()
+
+    // obtener datos del registro antes de borrar
+    const [rows] = await conn.query(
+      'SELECT id_orden, id_material, cantidad_usada FROM orden_material WHERE id = ?',
+      [req.params.id]
+    )
+    if (rows.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ message: 'Material no encontrado.' })
+    }
+    const { id_orden, id_material, cantidad_usada } = rows[0]
+
+    // verificar estado de la orden
+    const [orden] = await conn.query(
+      'SELECT estado FROM orden WHERE id = ?',
+      [id_orden]
+    )
+    if (!['recibido', 'en_proceso'].includes(orden[0].estado)) {
+      await conn.rollback()
+      return res.status(400).json({
+        message: `No se puede eliminar un material en una orden con estado "${orden[0].estado}".`,
+      })
+    }
+
+    // borrar el registro de orden_material
+    await conn.query('DELETE FROM orden_material WHERE id = ?', [req.params.id])
+
+    // borrar el movimiento de salida correspondiente
+    await conn.query(
+      `DELETE FROM movimiento_inventario
+       WHERE id_orden = ? AND id_inventario = ? AND tipo = 'salida_orden'
+       ORDER BY id DESC LIMIT 1`,
+      [id_orden, id_material]
+    )
+
+    // devolver la cantidad al inventario
+    await conn.query(
+      'UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?',
+      [parseFloat(cantidad_usada), id_material]
+    )
+
+    await recalcularTotalesOrden(conn, id_orden)
+    await conn.commit()
+    res.json({ message: 'Material eliminado y stock revertido.' })
   } catch (err) {
+    await conn.rollback()
     console.error(err)
     res.status(500).json({ message: 'Error interno.' })
+  } finally {
+    conn.release()
   }
 })
 
@@ -317,6 +475,7 @@ router.post('/:id_orden/repuestos', requireAuth, async (req, res) => {
       [parseInt(cantidad_usada), id_repuesto]
     )
 
+    await recalcularTotalesOrden(conn, req.params.id_orden)
     await conn.commit()
 
     const [nuevo] = await conn.query(
