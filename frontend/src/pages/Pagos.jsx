@@ -77,7 +77,8 @@ function ResumenCard({ resumen, esSeguro, orden }) {
   )
 }
 
-function generarReciboPDF({ pago, orden }) {
+// FIX: generarReciboPDF ahora recibe setError para informar si el navegador bloquea el popup.
+function generarReciboPDF({ pago, orden, setError }) {
   const fecha = fmtFechaHora(pago.fecha)
   const monto = fmt(pago.monto)
   const html = `<!DOCTYPE html>
@@ -123,7 +124,12 @@ function generarReciboPDF({ pago, orden }) {
   const blob    = new Blob([html], { type: 'text/html' })
   const url     = URL.createObjectURL(blob)
   const ventana = window.open(url, '_blank')
-  if (ventana) ventana.focus()
+  // FIX: si el navegador bloqueó el popup, informar al usuario en vez de silenciar el error
+  if (!ventana && setError) {
+    setError('El navegador bloqueó la ventana del recibo. Permitir popups para este sitio e intentar de nuevo.')
+  } else if (ventana) {
+    ventana.focus()
+  }
 }
 
 // ─── campo helper ─────────────────────────────────────────────────────────────
@@ -175,7 +181,8 @@ function FormPagoCliente({ idOrden, orden, onPagoCreado }) {
       const data = await res.json()
       if (!res.ok) { setError(data.message || 'Error al registrar pago.'); return }
       onPagoCreado(data)
-      generarReciboPDF({ pago: data, orden })
+      // FIX: pasar setError para que la función pueda reportar popup bloqueado
+      generarReciboPDF({ pago: data, orden, setError })
       setForm({ monto: '', fecha: new Date().toISOString().slice(0, 16), tipo: 'abono', metodo: 'efectivo', numero_recibo: '' })
     } catch { setError('No se pudo conectar con el servidor.') }
     finally { setCreando(false) }
@@ -333,6 +340,8 @@ function FormPagoSeguro({ idOrden, tipoPago, onPagoCreado }) {
 // ─── lista pagos cliente ──────────────────────────────────────────────────────
 function ListaPagosCliente({ pagos, orden, onEliminar }) {
   const [confirmandoId, setConfirmandoId] = useState(null)
+  // FIX: error inline en vez de alert()
+  const [error, setError] = useState('')
 
   if (pagos.length === 0) return <p style={s.vacio}>Sin pagos registrados.</p>
 
@@ -345,10 +354,11 @@ function ListaPagosCliente({ pagos, orden, onEliminar }) {
           titulo="Eliminar pago"
           mensaje={`¿Eliminar el pago de C$ ${fmt(pagoConfirmando.monto)} (${pagoConfirmando.tipo})? Esta acción no se puede deshacer.`}
           labelConfirmar="Sí, eliminar"
-          onConfirmar={() => { onEliminar(confirmandoId); setConfirmandoId(null) }}
+          onConfirmar={() => { onEliminar(confirmandoId, setError); setConfirmandoId(null) }}
           onCancelar={() => setConfirmandoId(null)}
         />
       )}
+      {error && <p style={s.err}>{error}</p>}
       <div style={s.listaPagos}>
         {pagos.map(p => (
           <div key={p.id} style={s.filaPago}>
@@ -360,7 +370,13 @@ function ListaPagosCliente({ pagos, orden, onEliminar }) {
               <Badge texto={p.tipo} />
               <span style={s.pagoMetodo}>{p.metodo}</span>
               {p.numero_recibo && <span style={s.pagoRecibo}>#{p.numero_recibo}</span>}
-              <button onClick={() => generarReciboPDF({ pago: p, orden })} style={s.btnPDF} title="Imprimir recibo">PDF</button>
+              <button
+                onClick={() => generarReciboPDF({ pago: p, orden, setError })}
+                style={s.btnPDF}
+                title="Imprimir recibo"
+              >
+                PDF
+              </button>
               <button onClick={() => setConfirmandoId(p.id)} style={s.btnX} title="Eliminar pago">✕</button>
             </div>
           </div>
@@ -372,9 +388,9 @@ function ListaPagosCliente({ pagos, orden, onEliminar }) {
 
 // ─── lista pagos seguro ───────────────────────────────────────────────────────
 function ListaPagosSeguro({ pagos, onActualizar, onEliminar }) {
-  const [editandoId, setEditandoId]     = useState(null)
-  const [formEdit, setFormEdit]         = useState({ fecha_recibido: '', referencia_bancaria: '' })
-  const [guardando, setGuardando]       = useState(false)
+  const [editandoId, setEditandoId]       = useState(null)
+  const [formEdit, setFormEdit]           = useState({ fecha_recibido: '', referencia_bancaria: '' })
+  const [guardando, setGuardando]         = useState(false)
   const [confirmandoId, setConfirmandoId] = useState(null)
 
   async function marcarRecibido(pago) {
@@ -565,7 +581,8 @@ export default function Pagos() {
     })
   }
 
-  async function handleEliminarPagoCliente(idPago) {
+  // FIX: recibe setError opcional para mostrar errores del backend inline
+  async function handleEliminarPagoCliente(idPago, setErrorLocal) {
     const pago = resumen?.pagos_cliente?.find(p => p.id === idPago)
     const res  = await fetch(`${API}/api/pagos/cliente/${idPago}`, {
       method: 'DELETE',
@@ -573,9 +590,7 @@ export default function Pagos() {
     })
     if (!res.ok) {
       const data = await res.json()
-      // El backend puede devolver 400 si la orden ya está entregada/cancelada.
-      // Recargamos para que el estado local quede sincronizado.
-      alert(data.message || 'No se pudo eliminar el pago.')
+      if (setErrorLocal) setErrorLocal(data.message || 'No se pudo eliminar el pago.')
       return
     }
     setResumen(prev => ({
@@ -594,7 +609,7 @@ export default function Pagos() {
     })
     if (!res.ok) {
       const data = await res.json()
-      alert(data.message || 'No se pudo eliminar el cobro.')
+      setError(data.message || 'No se pudo eliminar el cobro.')
       return
     }
     const eraPendiente = pago?.estado === 'pendiente'

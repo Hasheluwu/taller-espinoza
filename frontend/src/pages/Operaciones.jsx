@@ -6,6 +6,9 @@ const getToken = () => localStorage.getItem('token')
 const API = 'http://localhost:3001'
 const fmt = n => Number(n).toLocaleString('es-NI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+// Estados en los que se permite eliminar líneas
+const ESTADOS_EDITABLES = ['recibido', 'en_proceso']
+
 // ─── encabezado de la orden ───────────────────────────────────────────────────
 function EncabezadoOrden({ orden }) {
   if (!orden) return null
@@ -57,8 +60,27 @@ function Campo({ label, required, children }) {
   )
 }
 
+// ─── botón X con lógica de estado editable ────────────────────────────────────
+function BtnEliminar({ estadoOrden, onClick, title }) {
+  const editable = ESTADOS_EDITABLES.includes(estadoOrden)
+  const tooltip  = editable
+    ? (title || 'Eliminar')
+    : `No se puede eliminar en estado "${estadoOrden.replace('_', ' ')}"`
+
+  return (
+    <button
+      onClick={editable ? onClick : undefined}
+      disabled={!editable}
+      title={tooltip}
+      style={editable ? s.btnX : s.btnXDisabled}
+    >
+      ✕
+    </button>
+  )
+}
+
 // ─── sección servicios ────────────────────────────────────────────────────────
-function SeccionServicios({ idOrden, onOperacionHecha }) {
+function SeccionServicios({ idOrden, estadoOrden, onOperacionHecha, onTotalesActualizados }) {
   const [servicios, setServicios] = useState([])
   const [form, setForm]           = useState({ descripcion: '', precio: '', aplica_iva: true })
   const [creando, setCreando]     = useState(false)
@@ -90,8 +112,18 @@ function SeccionServicios({ idOrden, onOperacionHecha }) {
   }
 
   async function handleEliminar(id) {
-    await fetch(`${API}/api/operaciones/servicios/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
-    setServicios(prev => prev.filter(sv => sv.id !== id))
+    setError('')
+    const res = await fetch(`${API}/api/operaciones/servicios/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (res.ok) {
+      setServicios(prev => prev.filter(sv => sv.id !== id))
+      onTotalesActualizados()
+    } else {
+      const data = await res.json()
+      setError(data.message || 'No se pudo eliminar el servicio.')
+    }
   }
 
   return (
@@ -134,7 +166,7 @@ function SeccionServicios({ idOrden, onOperacionHecha }) {
                   <span style={s.itemVal}>C$ {fmt(sv.precio)}</span>
                   <span style={sv.aplica_iva ? s.ivaOn : s.ivaOff}>{sv.aplica_iva ? 'IVA' : '—'}</span>
                 </div>
-                <button onClick={() => handleEliminar(sv.id)} style={s.btnX}>✕</button>
+                <BtnEliminar estadoOrden={estadoOrden} onClick={() => handleEliminar(sv.id)} />
               </div>
             ))
           }
@@ -145,7 +177,7 @@ function SeccionServicios({ idOrden, onOperacionHecha }) {
 }
 
 // ─── sección materiales + personal ───────────────────────────────────────────
-function SeccionMateriales({ idOrden, onOperacionHecha }) {
+function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesActualizados }) {
   const [materiales, setMateriales]       = useState([])
   const [personal, setPersonal]           = useState([])
   const [inventario, setInventario]       = useState([])
@@ -179,21 +211,30 @@ function SeccionMateriales({ idOrden, onOperacionHecha }) {
       if (!formPers.id_personal || !formPers.monto_acordado)
         throw new Error('Debés asignar personal antes de registrar el material.')
 
-      const res = await fetch(`${API}/api/operaciones/${idOrden}/materiales`, {
+      // 1. Registrar material
+      const resMat = await fetch(`${API}/api/operaciones/${idOrden}/materiales`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(formMat),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.message)
+      const dataMat = await resMat.json()
+      if (!resMat.ok) throw new Error(dataMat.message)
 
+      // 2. Registrar personal — si falla, revertir el material
       const resPers = await fetch(`${API}/api/operaciones/${idOrden}/personal`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(formPers),
       })
       const dataPers = await resPers.json()
-      if (!resPers.ok) throw new Error(dataPers.message)
+      if (!resPers.ok) {
+        // FIX: revertir el material ya guardado para no dejar stock descontado sin personal
+        await fetch(`${API}/api/operaciones/materiales/${dataMat.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${getToken()}` },
+        })
+        throw new Error(`El material se guardó pero el personal falló y fue revertido. Error: ${dataPers.message}`)
+      }
 
-      setMateriales(prev => [...prev, data])
+      setMateriales(prev => [...prev, dataMat])
       setPersonal(prev => [...prev, dataPers])
       setFormMat({ id_material: '', cantidad_usada: '' })
       setFormPers({ id_personal: '', monto_acordado: '' })
@@ -218,13 +259,32 @@ function SeccionMateriales({ idOrden, onOperacionHecha }) {
   }
 
   async function handleEliminarMat(id) {
-    await fetch(`${API}/api/operaciones/materiales/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
-    setMateriales(prev => prev.filter(m => m.id !== id))
+    setError('')
+    const res = await fetch(`${API}/api/operaciones/materiales/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (res.ok) {
+      setMateriales(prev => prev.filter(m => m.id !== id))
+      onTotalesActualizados()
+    } else {
+      const data = await res.json()
+      setError(data.message || 'No se pudo eliminar el material.')
+    }
   }
 
   async function handleEliminarPers(id) {
-    await fetch(`${API}/api/operaciones/personal-asignado/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
-    setPersonal(prev => prev.filter(p => p.id !== id))
+    setError('')
+    const res = await fetch(`${API}/api/operaciones/personal-asignado/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (res.ok) {
+      setPersonal(prev => prev.filter(p => p.id !== id))
+    } else {
+      const data = await res.json()
+      setError(data.message || 'No se pudo eliminar el personal.')
+    }
   }
 
   const fijos = personalLista.filter(p => p.fijo)
@@ -345,7 +405,7 @@ function SeccionMateriales({ idOrden, onOperacionHecha }) {
                     <span style={s.itemVal}>×{m.cantidad_usada} {m.unidad_medida}</span>
                     <span style={s.itemVal}>C$ {fmt(m.precio_unitario)}</span>
                   </div>
-                  <button onClick={() => handleEliminarMat(m.id)} style={s.btnX}>✕</button>
+                  <BtnEliminar estadoOrden={estadoOrden} onClick={() => handleEliminarMat(m.id)} />
                 </div>
               ))
             }
@@ -361,7 +421,7 @@ function SeccionMateriales({ idOrden, onOperacionHecha }) {
                     <span style={s.itemMeta}>{p.rol}</span>
                     <span style={s.itemVal}>C$ {fmt(p.monto_acordado)}</span>
                   </div>
-                  <button onClick={() => handleEliminarPers(p.id)} style={s.btnX}>✕</button>
+                  <BtnEliminar estadoOrden={estadoOrden} onClick={() => handleEliminarPers(p.id)} />
                 </div>
               ))
             }
@@ -373,7 +433,7 @@ function SeccionMateriales({ idOrden, onOperacionHecha }) {
 }
 
 // ─── sección repuestos + personal ─────────────────────────────────────────────
-function SeccionRepuestos({ idOrden, onOperacionHecha }) {
+function SeccionRepuestos({ idOrden, estadoOrden, onOperacionHecha, onTotalesActualizados }) {
   const [repuestos, setRepuestos]         = useState([])
   const [personal, setPersonal]           = useState([])
   const [lista, setLista]                 = useState([])
@@ -406,19 +466,28 @@ function SeccionRepuestos({ idOrden, onOperacionHecha }) {
     try {
       if (!formPers.id_personal || !formPers.monto_acordado)
         throw new Error('Debés asignar personal.')
-      const res = await fetch(`${API}/api/operaciones/${idOrden}/repuestos`, {
+
+      // 1. Registrar repuesto
+      const resRep = await fetch(`${API}/api/operaciones/${idOrden}/repuestos`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(formRep),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.message)
+      const dataRep = await resRep.json()
+      if (!resRep.ok) throw new Error(dataRep.message)
+
+      // 2. Registrar personal — si falla, informar (no hay DELETE de repuesto implementado aún)
       const resPers = await fetch(`${API}/api/operaciones/${idOrden}/personal`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(formPers),
       })
       const dataPers = await resPers.json()
-      if (!resPers.ok) throw new Error(dataPers.message)
-      setRepuestos(prev => [...prev, data])
+      if (!resPers.ok) {
+        // NOTA: DELETE de repuesto no está implementado en el backend todavía.
+        // El repuesto queda guardado pero el personal no. Reportar al usuario.
+        throw new Error(`El repuesto se guardó pero el personal falló. Eliminá el repuesto manualmente y volvé a intentarlo. Error: ${dataPers.message}`)
+      }
+
+      setRepuestos(prev => [...prev, dataRep])
       setPersonal(prev => [...prev, dataPers])
       setFormRep({ id_repuesto: '', cantidad_usada: '' })
       setFormPers({ id_personal: '', monto_acordado: '' })
@@ -548,6 +617,7 @@ function SeccionRepuestos({ idOrden, onOperacionHecha }) {
                     <span style={s.itemVal}>×{r.cantidad_usada}</span>
                     <span style={s.itemVal}>C$ {fmt(r.precio_unitario)}</span>
                   </div>
+                  {/* DELETE de repuestos pendiente de implementar en el backend */}
                 </div>
               ))
             }
@@ -620,8 +690,24 @@ function SeccionDanos({ idOrden, tipoPago, onOperacionHecha, navigate }) {
       if (!res.ok) throw new Error('No se pudo cargar la orden.')
       const orden = await res.json()
 
-      const cliente  = { id: orden.id_cliente,  nombre: orden.nombre_cliente, cedula: orden.cedula, telefono: orden.telefono }
-      const vehiculo = { id: orden.id_vehiculo, matricula: orden.matricula, marca: orden.marca, modelo: orden.modelo, anio_fabricacion: orden.anio_fabricacion, aseguradora: orden.aseguradora_vehiculo ?? 'ninguna', color: orden.color }
+      const cliente  = {
+        id:       orden.id_cliente,
+        nombre:   orden.nombre_cliente,
+        cedula:   orden.cedula,
+        telefono: orden.telefono,
+      }
+      const vehiculo = {
+        id:               orden.id_vehiculo,
+        matricula:        orden.matricula,
+        marca:            orden.marca,
+        modelo:           orden.modelo,
+        anio_fabricacion: orden.anio_fabricacion,
+        // FIX: el endpoint GET /api/ordenes/:id devuelve el campo como
+        // 'aseguradora' (del JOIN con vehiculo). Ajustar si tu ordenes.js
+        // usa un alias distinto — verificar el SELECT en ese archivo.
+        aseguradora:      orden.aseguradora ?? 'ninguna',
+        color:            orden.color,
+      }
 
       navigate('/ordenes/nueva/orden', {
         state: {
@@ -743,10 +829,10 @@ export default function Operaciones() {
   const { id } = useParams()
   const navigate = useNavigate()
 
-  const [orden, setOrden]               = useState(null)
-  const [totales, setTotales]           = useState(null)
-  const [loading, setLoading]           = useState(true)
-  const [seccionAbierta, setSeccion]    = useState(null)
+  const [orden, setOrden]                = useState(null)
+  const [totales, setTotales]            = useState(null)
+  const [loading, setLoading]            = useState(true)
+  const [seccionAbierta, setSeccion]     = useState(null)
   const [mostrarModalPago, setModalPago] = useState(false)
 
   useEffect(() => {
@@ -755,7 +841,6 @@ export default function Operaciones() {
       const res = await fetch(`${API}/api/ordenes/${id}`, { headers })
       if (res.ok) setOrden(await res.json())
 
-      // recalcular totales al entrar — sincroniza datos inorgánicos o desactualizados
       const rTotales = await fetch(`${API}/api/operaciones/${id}/recalcular`, {
         method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
       })
@@ -822,15 +907,30 @@ export default function Operaciones() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <Seccion titulo="Servicios / Líneas de cobro" abierta={seccionAbierta === 'servicios'} onToggle={() => toggle('servicios')}>
-            <SeccionServicios idOrden={id} onOperacionHecha={operacionHecha} />
+            <SeccionServicios
+              idOrden={id}
+              estadoOrden={orden.estado}
+              onOperacionHecha={operacionHecha}
+              onTotalesActualizados={actualizarTotales}
+            />
           </Seccion>
 
           <Seccion titulo="Materiales + Personal" abierta={seccionAbierta === 'materiales'} onToggle={() => toggle('materiales')}>
-            <SeccionMateriales idOrden={id} onOperacionHecha={operacionHecha} />
+            <SeccionMateriales
+              idOrden={id}
+              estadoOrden={orden.estado}
+              onOperacionHecha={operacionHecha}
+              onTotalesActualizados={actualizarTotales}
+            />
           </Seccion>
 
           <Seccion titulo="Repuestos + Personal" abierta={seccionAbierta === 'repuestos'} onToggle={() => toggle('repuestos')}>
-            <SeccionRepuestos idOrden={id} onOperacionHecha={operacionHecha} />
+            <SeccionRepuestos
+              idOrden={id}
+              estadoOrden={orden.estado}
+              onOperacionHecha={operacionHecha}
+              onTotalesActualizados={actualizarTotales}
+            />
           </Seccion>
 
           <Seccion titulo="Daños ocultos" abierta={seccionAbierta === 'danos'} onToggle={() => toggle('danos')}>
@@ -893,6 +993,7 @@ const s = {
   btnDisabled:      { backgroundColor: 'var(--surface)', color: 'var(--neutral-400)', fontSize: 'var(--text-body)', padding: '0.65rem 1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', cursor: 'not-allowed', opacity: 0.5 },
   btnGhost:         { backgroundColor: 'transparent', color: 'var(--blue-300)', fontSize: 'var(--text-small)', fontWeight: 'var(--weight-medium)', padding: '0.35rem 0', border: 'none', cursor: 'pointer', textAlign: 'left' },
   btnX:             { backgroundColor: 'transparent', color: 'var(--danger)', border: 'none', cursor: 'pointer', fontSize: '0.8rem', padding: '0.2rem 0.4rem', borderRadius: 'var(--radius-sm)', flexShrink: 0 },
+  btnXDisabled:     { backgroundColor: 'transparent', color: 'var(--neutral-500)', border: 'none', cursor: 'not-allowed', fontSize: '0.8rem', padding: '0.2rem 0.4rem', borderRadius: 'var(--radius-sm)', flexShrink: 0, opacity: 0.35 },
   err:              { fontSize: 'var(--text-small)', color: 'var(--danger)', backgroundColor: 'var(--danger-bg)', border: '1px solid rgba(229,72,77,0.25)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', margin: 0 },
   vacio:            { fontSize: 'var(--text-small)', color: 'var(--neutral-400)', margin: 0, fontStyle: 'italic' },
   totalesCard:      { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '1rem 1.5rem', display: 'flex', alignItems: 'center', gap: '2rem', flexWrap: 'wrap' },

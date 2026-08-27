@@ -157,7 +157,6 @@ router.delete('/cliente/:id', requireAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // PAGOS DE ASEGURADORA
 // POST /api/pagos/:id_orden/seguro
-// Igual que pago_cliente: transacción + auditoría.
 // ═══════════════════════════════════════════════════════════
 router.post('/:id_orden/seguro', requireAuth, async (req, res) => {
   const { id_orden } = req.params
@@ -215,7 +214,6 @@ router.post('/:id_orden/seguro', requireAuth, async (req, res) => {
 
 // ───────────────────────────────────────────────────────────
 // PATCH /api/pagos/seguro/:id/estado — marcar como recibido
-// Verifica existencia antes de actualizar.
 // ───────────────────────────────────────────────────────────
 router.patch('/seguro/:id/estado', requireAuth, async (req, res) => {
   const { estado, fecha_recibido, referencia_bancaria } = req.body
@@ -266,7 +264,6 @@ router.patch('/seguro/:id/estado', requireAuth, async (req, res) => {
 
 // ───────────────────────────────────────────────────────────
 // DELETE /api/pagos/seguro/:id
-// Verifica existencia antes de borrar.
 // ───────────────────────────────────────────────────────────
 router.delete('/seguro/:id', requireAuth, async (req, res) => {
   const conn = await pool.getConnection()
@@ -309,12 +306,32 @@ router.delete('/seguro/:id', requireAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // CAMBIAR ESTADO A ENTREGADO
 // PATCH /api/pagos/:id_orden/entregar
+// FIX: ahora verifica que la orden no esté ya entregada o cancelada
+// antes de hacer el UPDATE, evitando registros duplicados en auditoría.
 // ═══════════════════════════════════════════════════════════
 router.patch('/:id_orden/entregar', requireAuth, async (req, res) => {
   const { numero_factura_fisica } = req.body
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+
+    // Verificar estado actual de la orden
+    const [rows] = await conn.query(
+      'SELECT estado FROM orden WHERE id = ?',
+      [req.params.id_orden]
+    )
+    if (rows.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ message: 'Orden no encontrada.' })
+    }
+    if (rows[0].estado === 'entregado') {
+      await conn.rollback()
+      return res.status(400).json({ message: 'La orden ya está marcada como entregada.' })
+    }
+    if (rows[0].estado === 'cancelado') {
+      await conn.rollback()
+      return res.status(400).json({ message: 'No se puede entregar una orden cancelada.' })
+    }
 
     await conn.query(
       `UPDATE orden SET estado = 'entregado', fecha_entrega_real = CURRENT_DATE,

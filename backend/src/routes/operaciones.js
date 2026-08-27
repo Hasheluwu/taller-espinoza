@@ -5,6 +5,9 @@ const requireAuth = require('../middleware/authMiddleware')
 
 const router = express.Router()
 
+// Estados en los que se permite eliminar/modificar líneas de una orden
+const ESTADOS_EDITABLES = ['recibido', 'en_proceso']
+
 // ═══════════════════════════════════════════════════════════
 // RECÁLCULO DE TOTALES DE LA ORDEN
 // Suma servicios + materiales + repuestos y actualiza
@@ -142,7 +145,7 @@ router.delete('/servicios/:id', requireAuth, async (req, res) => {
       'SELECT estado FROM orden WHERE id = ?',
       [id_orden]
     )
-    if (!['recibido', 'en_proceso'].includes(orden[0].estado)) {
+    if (!ESTADOS_EDITABLES.includes(orden[0].estado)) {
       await conn.rollback()
       return res.status(400).json({
         message: `No se puede eliminar una línea en una orden con estado "${orden[0].estado}".`,
@@ -242,13 +245,39 @@ router.post('/:id_orden/personal', requireAuth, async (req, res) => {
 })
 
 // DELETE /api/operaciones/personal-asignado/:id
+// FIX: ahora verifica que la orden esté en estado editable antes de borrar.
 router.delete('/personal-asignado/:id', requireAuth, async (req, res) => {
+  const conn = await pool.getConnection()
   try {
-    await pool.query('DELETE FROM orden_personal WHERE id = ?', [req.params.id])
+    await conn.beginTransaction()
+
+    // Obtener id_orden del registro antes de borrar
+    const [rows] = await conn.query(
+      'SELECT op.id_orden, o.estado FROM orden_personal op JOIN orden o ON o.id = op.id_orden WHERE op.id = ?',
+      [req.params.id]
+    )
+    if (rows.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ message: 'Asignación de personal no encontrada.' })
+    }
+
+    const { estado } = rows[0]
+    if (!ESTADOS_EDITABLES.includes(estado)) {
+      await conn.rollback()
+      return res.status(400).json({
+        message: `No se puede eliminar personal en una orden con estado "${estado}".`,
+      })
+    }
+
+    await conn.query('DELETE FROM orden_personal WHERE id = ?', [req.params.id])
+    await conn.commit()
     res.json({ message: 'Personal removido.' })
   } catch (err) {
+    await conn.rollback()
     console.error(err)
     res.status(500).json({ message: 'Error interno.' })
+  } finally {
+    conn.release()
   }
 })
 
@@ -371,7 +400,7 @@ router.delete('/materiales/:id', requireAuth, async (req, res) => {
       'SELECT estado FROM orden WHERE id = ?',
       [id_orden]
     )
-    if (!['recibido', 'en_proceso'].includes(orden[0].estado)) {
+    if (!ESTADOS_EDITABLES.includes(orden[0].estado)) {
       await conn.rollback()
       return res.status(400).json({
         message: `No se puede eliminar un material en una orden con estado "${orden[0].estado}".`,
