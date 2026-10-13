@@ -1,165 +1,132 @@
-// frontend/src/pages/Dashboard.jsx
+import { apiFetch } from '../lib/api'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 const getToken = () => localStorage.getItem('token')
-const API = 'http://localhost:3001'
+const API = ''
 
 const ESTADO_STYLES = {
-  recibido:   { bg: 'rgba(107,138,170,0.15)', color: '#6b8aaa', border: 'rgba(107,138,170,0.3)' },
-  en_proceso: { bg: 'rgba(255,195,0,0.12)',   color: '#FFC300', border: 'rgba(255,195,0,0.3)'   },
-  listo:      { bg: 'rgba(34,197,94,0.12)',   color: '#22c55e', border: 'rgba(34,197,94,0.3)'   },
-  entregado:  { bg: 'rgba(51,133,214,0.12)',  color: '#3385d6', border: 'rgba(51,133,214,0.3)'  },
-  cancelado:  { bg: 'rgba(229,72,77,0.12)',   color: '#e5484d', border: 'rgba(229,72,77,0.3)'   },
-}
-
-function BadgeEstado({ estado }) {
-  const st = ESTADO_STYLES[estado] || ESTADO_STYLES.recibido
-  return (
-    <span style={{ backgroundColor: st.bg, color: st.color, border: `1px solid ${st.border}`, borderRadius: 'var(--radius-full)', padding: '0.2rem 0.65rem', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)' }}>
-      {estado.replace('_', ' ')}
-    </span>
-  )
+  recibido:   { badgeClass: 'badge-cyber-cyan',    label: 'Recibidos',           color: '#ffac7c' },
+  en_proceso: { badgeClass: 'badge-cyber-orange',  label: 'En Proceso',          color: '#fb923c' },
+  listo:      { badgeClass: 'badge-cyber-emerald', label: 'Listos para Entrega', color: '#34d399' },
+  entregado:  { badgeClass: 'badge-cyber-violet',  label: 'Entregados',          color: '#a78bfa' },
 }
 
 function fmt(n) {
-  if (n == null) return '—'
+  if (n == null) return '0.00'
   return Number(n).toLocaleString('es-NI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
-function fmtFecha(f) {
-  if (!f) return '—'
-  return new Date(f).toLocaleDateString('es-NI')
-}
 
-function SeccionTitulo({ children }) {
+function MetricCard({ title, value, subtitle, icon, trend, onClick }) {
   return (
-    <h2 style={{ fontSize: 'var(--text-body-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--foreground)', margin: 0, borderLeft: '3px solid var(--yellow-500)', paddingLeft: '0.75rem' }}>
-      {children}
-    </h2>
-  )
-}
-
-function CardMetrica({ label, valor, sub, onClick, accent, disabled }) {
-  return (
-    <div onClick={!disabled ? onClick : undefined} title={disabled ? 'Disponible próximamente' : undefined}
-      style={{ backgroundColor: 'var(--surface)', border: `1px solid ${accent ? 'rgba(255,195,0,0.35)' : 'var(--border)'}`, borderRadius: 'var(--radius-lg)', padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', cursor: disabled ? 'not-allowed' : onClick ? 'pointer' : 'default', opacity: disabled ? 0.5 : 1, transition: 'border-color 0.15s' }}
-      onMouseEnter={e => { if (!disabled && onClick) e.currentTarget.style.borderColor = 'var(--yellow-500)' }}
-      onMouseLeave={e => { if (!disabled && onClick) e.currentTarget.style.borderColor = accent ? 'rgba(255,195,0,0.35)' : 'var(--border)' }}
+    <div
+      onClick={onClick} role={onClick ? 'button' : undefined} tabIndex={onClick ? 0 : undefined} onKeyDown={onClick ? e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } } : undefined}
+      className="card-cyber metric-card animate-fade-in-up"
+      style={{
+        padding: '1.35rem 1.5rem',
+        cursor: onClick ? 'pointer' : 'default',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.65rem'
+      }}
     >
-      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
-      <span style={{ fontSize: '2rem', fontWeight: 'var(--weight-bold)', color: accent ? 'var(--yellow-400)' : 'var(--foreground)', lineHeight: 1 }}>
-        {valor ?? <span style={{ fontSize: '0.9rem', color: 'var(--neutral-400)' }}>cargando…</span>}
-      </span>
-      {sub && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>{sub}</span>}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: '0.75rem', fontWeight: '800', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {title}
+        </span>
+        {icon && (
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '10px',
+            backgroundColor: 'rgba(255, 149, 89, 0.15)',
+            color: '#ffac7c',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            {icon}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
+        <span className="metric-value" style={{ fontSize: '2.1rem', fontWeight: '900', color: '#f9fafb', lineHeight: 1 }}>
+          {value ?? <span style={{ fontSize: '1rem', color: '#979faa' }}>Cargando...</span>}
+        </span>
+        {trend && (
+          <span className="badge-cyber badge-cyber-emerald">
+            {trend}
+          </span>
+        )}
+      </div>
+
+      {subtitle && (
+        <span style={{ fontSize: '0.78rem', color: '#979faa' }}>
+          {subtitle}
+        </span>
+      )}
     </div>
   )
 }
 
-function Alerta({ texto }) {
-  return <p style={{ fontSize: 'var(--text-small)', color: 'var(--danger)', backgroundColor: 'rgba(229,72,77,0.08)', border: '1px solid rgba(229,72,77,0.2)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', margin: 0 }}>{texto}</p>
-}
-
-// ─── Banner de debug ──────────────────────────────────────────────────────────
-// Limpia todas las tablas y recarga el seed completo. Solo usar en desarrollo.
 function DebugResetBanner() {
-  const [estado, setEstado] = useState('idle') // idle | loading | ok | error
-  const [msg,    setMsg]    = useState('')
+  const [estado, setEstado] = useState('idle')
+  const [msg, setMsg] = useState('')
 
   async function handleReset() {
-    const confirmar = window.confirm(
-      '⚠️  REINICIO DE BASE DE DATOS\n\n' +
-      'Esto borrará TODOS los datos actuales y cargará el seed de prueba.\n\n' +
-      '¿Continuar?'
-    )
-    if (!confirmar) return
-
+    if (!window.confirm('⚠️ ¿Deseas reiniciar la base de datos con el seed de prueba?')) return
     setEstado('loading')
     setMsg('')
     try {
-      const res = await fetch(`${API}/api/debug/reset-db`, {
+      const res = await apiFetch(`${API}/api/debug/reset-db`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await res.json()
       if (res.ok) {
         setEstado('ok')
-        setMsg('Base de datos reiniciada. Recargá la página para ver los datos frescos.')
+        setMsg('¡Base de datos reiniciada con éxito!')
       } else {
         setEstado('error')
-        setMsg(data.message || 'Error desconocido en el servidor.')
+        setMsg(data.message || 'Error al reiniciar.')
       }
-    } catch (err) {
+    } catch {
       setEstado('error')
-      setMsg('No se pudo conectar con el backend.')
+      setMsg('Error al conectar.')
     }
   }
 
-  const colorBorde = estado === 'ok'    ? 'rgba(34,197,94,0.4)'
-                   : estado === 'error' ? 'rgba(229,72,77,0.4)'
-                   : 'rgba(255,195,0,0.25)'
-
-  const colorFondo = estado === 'ok'    ? 'rgba(34,197,94,0.06)'
-                   : estado === 'error' ? 'rgba(229,72,77,0.06)'
-                   : 'rgba(255,195,0,0.04)'
-
   return (
-    <div style={{
-      border: `1px dashed ${colorBorde}`,
-      borderRadius: 'var(--radius-lg)',
-      backgroundColor: colorFondo,
+    <div className="card-cyber" style={{
       padding: '0.85rem 1.25rem',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: '1rem',
-      flexWrap: 'wrap',
+      borderLeft: '4px solid #ff9559'
     }}>
-      {/* Texto descriptivo */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-        <span style={{
-          fontSize: 'var(--text-xs)',
-          fontWeight: 'var(--weight-medium)',
-          color: 'var(--yellow-500)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.1em',
-        }}>
-          DEBUG — Solo desarrollo
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <span style={{ fontSize: '0.725rem', fontWeight: '800', color: '#ffac7c', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          ENTORNO DE PRUEBAS — SEED DATA
         </span>
-        <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)' }}>
-          Rellenar base de datos con datos inorgánicos de órdenes, clientes, vehículos, pagos y personal
+        <span style={{ fontSize: '0.825rem', color: '#9ca3af' }}>
+          Rellenar base de datos con clientes, vehículos y órdenes inorgánicas de prueba
         </span>
         {msg && (
-          <span style={{
-            fontSize: 'var(--text-xs)',
-            color: estado === 'ok' ? '#22c55e' : 'var(--danger)',
-            marginTop: '0.15rem',
-          }}>
-            {estado === 'ok' ? '✓ ' : '✗ '}{msg}
+          <span style={{ fontSize: '0.78rem', color: estado === 'ok' ? '#34d399' : '#fb7185', marginTop: '0.2rem' }}>
+            {msg}
           </span>
         )}
       </div>
 
-      {/* Botón */}
       <button
         onClick={handleReset}
         disabled={estado === 'loading'}
-        style={{
-          backgroundColor: estado === 'loading' ? 'var(--surface-raised)' : 'rgba(255,195,0,0.12)',
-          color: estado === 'loading' ? 'var(--neutral-400)' : 'var(--yellow-400)',
-          border: `1px solid ${estado === 'loading' ? 'var(--border)' : 'rgba(255,195,0,0.35)'}`,
-          borderRadius: 'var(--radius-md)',
-          padding: '0.5rem 1rem',
-          fontSize: 'var(--text-small)',
-          fontWeight: 'var(--weight-medium)',
-          cursor: estado === 'loading' ? 'not-allowed' : 'pointer',
-          whiteSpace: 'nowrap',
-          transition: 'all 0.15s',
-          flexShrink: 0,
-        }}
-        onMouseEnter={e => { if (estado !== 'loading') e.currentTarget.style.backgroundColor = 'rgba(255,195,0,0.2)' }}
-        onMouseLeave={e => { if (estado !== 'loading') e.currentTarget.style.backgroundColor = 'rgba(255,195,0,0.12)' }}
+        className="btn-cyber-outline"
+        style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
       >
-        {estado === 'loading' ? 'Reiniciando…' : '⟳  Rellenar'}
+        {estado === 'loading' ? 'Reiniciando...' : '⚡ Restaurar Seed'}
       </button>
     </div>
   )
@@ -173,238 +140,268 @@ export default function Dashboard() {
   const [recientes,  setRecientes]  = useState(null)
   const [cobros,     setCobros]     = useState(null)
   const [stockBajo,  setStockBajo]  = useState(null)
-  const [liquidPend, setLiquidPend] = useState(null)
-  const [errores,    setErrores]    = useState({})
+  const [error, setError] = useState(false)
 
   async function get(endpoint) {
-    const res = await fetch(`${API}${endpoint}`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    const res = await apiFetch(`${API}${endpoint}`, { headers: { Authorization: `Bearer ${getToken()}` } })
     if (!res.ok) throw new Error(`${res.status}`)
     return res.json()
   }
-  async function cargar(key, fn, setter) {
-    try { setter(await fn()) } catch { setErrores(prev => ({ ...prev, [key]: true })) }
-  }
 
   useEffect(() => {
-    cargar('metricas',   () => get('/api/dashboard/metricas'),                setMetricas)
-    cargar('breakdown',  () => get('/api/dashboard/breakdown-estados'),        setBreakdown)
-    cargar('recientes',  () => get('/api/dashboard/ordenes-recientes'),        setRecientes)
-    cargar('cobros',     () => get('/api/dashboard/cobros-pendientes'),        setCobros)
-    cargar('stockBajo',  () => get('/api/dashboard/stock-bajo'),               setStockBajo)
-    cargar('liquidPend', () => get('/api/dashboard/liquidaciones-pendientes'), setLiquidPend)
+    get('/api/dashboard/metricas').then(setMetricas).catch(() => setError(true))
+    get('/api/dashboard/breakdown-estados').then(setBreakdown).catch(() => setError(true))
+    get('/api/dashboard/ordenes-recientes').then(setRecientes).catch(() => setError(true))
+    get('/api/dashboard/cobros-pendientes').then(setCobros).catch(() => setError(true))
+    get('/api/dashboard/stock-bajo').then(setStockBajo).catch(() => setError(true))
   }, [])
 
   return (
-    <div style={s.page}>
-      <div style={s.container}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }} className="animate-fade-in-up">
+      
+      {import.meta.env.DEV && <details><summary style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', cursor: 'pointer' }}>Herramientas de desarrollo</summary><DebugResetBanner /></details>}
 
-        {/* ── DEBUG BANNER ───────────────────────────────────────────────── */}
-        <DebugResetBanner />
-
-        {/* encabezado */}
-        <div style={s.header}>
-          <div>
-            <span style={s.eyebrow}>Sistema de gestión</span>
-            <h1 style={s.titulo}>Taller <span style={s.accent}>Pedro Espinoza</span></h1>
-          </div>
-          <button onClick={() => navigate('/ordenes/nueva')} style={s.btnPrimario}>+ Nueva orden</button>
+      {error && <div className="dashboard-error" role="alert">No se pudieron cargar algunos datos del taller. Comprueba la conexión con el servidor.<button onClick={() => window.location.reload()}>Reintentar</button></div>}
+      {/* HEADER DE COMANDO */}
+      <div className="dashboard-heading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <span style={{ fontSize: '0.75rem', fontWeight: '800', color: '#ff9559', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            TU TALLER, EN UN VISTAZO
+          </span>
+          <h1 style={{ fontSize: '1.85rem', fontWeight: '900', color: '#f9fafb', margin: 0, lineHeight: 1.1 }}>
+            Cada reparación, bajo control.
+          </h1><p className="dashboard-subtitle">Consulta el trabajo de hoy y lo que necesita tu atención.</p>
         </div>
 
-        {/* ── ACCESOS RÁPIDOS ────────────────────────────────────────────── */}
-        <section style={s.seccion}>
-          <SeccionTitulo>Accesos rápidos</SeccionTitulo>
-          <div style={s.grid4}>
-            <button style={s.btnAcceso} onClick={() => navigate('/ordenes/nueva')}>+ Nueva orden</button>
-            <button style={s.btnAcceso} onClick={() => navigate('/ordenes')}>Ver órdenes</button>
-            <button style={{ ...s.btnAcceso, ...s.btnAccesoDisabled }} disabled title="Disponible próximamente">Inventario</button>
-            <button style={{ ...s.btnAcceso, ...s.btnAccesoDisabled }} disabled title="Disponible próximamente">Liquidaciones</button>
-            <button style={{ ...s.btnAcceso, ...s.btnAccesoDisabled }} disabled title="Disponible próximamente">Contabilidad</button>
-            <button style={{ ...s.btnAcceso, ...s.btnAccesoDisabled }} disabled title="Disponible próximamente">Linker LAFISE</button>
-            <button style={{ ...s.btnAcceso, ...s.btnAccesoDisabled }} disabled title="Disponible próximamente">Ajustes</button>
-          </div>
-        </section>
-
-        {/* ── MÉTRICAS ───────────────────────────────────────────────────── */}
-        <section style={s.seccion}>
-          <SeccionTitulo>Resumen del día</SeccionTitulo>
-          <div style={s.grid4}>
-            <CardMetrica label="Órdenes activas"         valor={metricas?.activas}           sub="en proceso o recibidas"  accent onClick={() => navigate('/ordenes')} />
-            <CardMetrica label="Listas para entregar"    valor={metricas?.listas}            sub="esperando al cliente"          onClick={() => navigate('/ordenes')} />
-            <CardMetrica label="Recibidas hoy"           valor={metricas?.hoy}               sub="ingresadas en el día"          onClick={() => navigate('/ordenes')} />
-            <CardMetrica label="Cobros aseg. pendientes" valor={metricas?.cobros_pendientes != null ? `C$ ${fmt(metricas.cobros_pendientes)}` : null} sub="monto total sin recibir" />
-          </div>
-          {errores.metricas && <Alerta texto="No se pudieron cargar las métricas." />}
-        </section>
-
-        {/* ── ESTADO DEL TALLER ──────────────────────────────────────────── */}
-        <section style={s.seccion}>
-          <SeccionTitulo>Estado del taller</SeccionTitulo>
-          <div style={s.grid5}>
-            {breakdown
-              ? Object.entries(ESTADO_STYLES).map(([estado, st]) => {
-                  const count = breakdown[estado] ?? 0
-                  return (
-                    <div key={estado} onClick={() => navigate('/ordenes')}
-                      style={{ backgroundColor: st.bg, border: `1px solid ${st.border}`, borderRadius: 'var(--radius-lg)', padding: '1rem 1.25rem', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}
-                      onMouseEnter={e => { e.currentTarget.style.opacity = '0.8' }}
-                      onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
-                    >
-                      <span style={{ fontSize: '1.6rem', fontWeight: 'var(--weight-bold)', color: st.color }}>{count}</span>
-                      <span style={{ fontSize: 'var(--text-xs)', color: st.color, textTransform: 'capitalize' }}>{estado.replace('_', ' ')}</span>
-                    </div>
-                  )
-                })
-              : <span style={{ color: 'var(--neutral-400)', fontSize: 'var(--text-small)' }}>Cargando…</span>
-            }
-          </div>
-          {errores.breakdown && <Alerta texto="No se pudo cargar el estado del taller." />}
-        </section>
-
-        {/* ── ÓRDENES RECIENTES ──────────────────────────────────────────── */}
-        <section style={s.seccion}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <SeccionTitulo>Órdenes activas recientes</SeccionTitulo>
-            <button onClick={() => navigate('/ordenes')} style={s.btnLink}>Ver todas →</button>
-          </div>
-          {recientes === null && !errores.recientes && <p style={s.cargando}>Cargando…</p>}
-          {errores.recientes && <Alerta texto="No se pudieron cargar las órdenes recientes." />}
-          {recientes?.length === 0 && <div style={s.vacio}><p style={s.vacioTexto}>No hay órdenes activas actualmente.</p></div>}
-          {recientes?.length > 0 && (
-            <div style={s.tabla}>
-              <div style={s.tablaHeader}>
-                <span>Matrícula</span><span>Cliente</span><span>Tipo</span><span>Estado</span><span>Ingreso</span><span>Entrega est.</span><span></span>
-              </div>
-              {recientes.map(o => (
-                <div key={o.id} style={s.tablaFila}>
-                  <span style={s.matricula}>{o.matricula}</span>
-                  <span style={s.clienteNombre}>{o.nombre_cliente}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)', textTransform: 'capitalize' }}>{o.tipo}</span>
-                  <BadgeEstado estado={o.estado} />
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)' }}>{fmtFecha(o.fecha_ingreso)}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)' }}>{fmtFecha(o.fecha_entrega_estimada)}</span>
-                  <div style={{ display: 'flex', gap: '0.4rem' }}>
-                    <button style={s.btnTabla} onClick={() => navigate(`/ordenes/${o.id}/operaciones`)}>Operaciones</button>
-                    <button style={{ ...s.btnTabla, ...s.btnTablaAmarillo }} onClick={() => navigate(`/ordenes/${o.id}/pago`)}>Pago</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* ── COBROS PENDIENTES ──────────────────────────────────────────── */}
-        <section style={s.seccion}>
-          <SeccionTitulo>Cobros pendientes — Aseguradoras</SeccionTitulo>
-          {cobros === null && !errores.cobros && <p style={s.cargando}>Cargando…</p>}
-          {errores.cobros && <Alerta texto="No se pudieron cargar los cobros pendientes." />}
-          {cobros?.length === 0 && <div style={s.vacio}><p style={s.vacioTexto}>No hay cobros pendientes de aseguradoras.</p></div>}
-          {cobros?.length > 0 && (
-            <div style={s.tabla}>
-              <div style={{ ...s.tablaHeader, gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr' }}>
-                <span>Matrícula</span><span>Aseguradora</span><span>Concepto</span><span>Monto</span><span>Fecha esperada</span>
-              </div>
-              {cobros.map(c => (
-                <div key={c.id} style={{ ...s.tablaFila, gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr' }}>
-                  <span style={s.matricula}>{c.matricula}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-200)', textTransform: 'uppercase' }}>{c.tipo_pago}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)', textTransform: 'capitalize' }}>{c.concepto.replace('_', ' ')}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--yellow-400)', fontWeight: 'var(--weight-medium)' }}>C$ {fmt(c.monto)}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)' }}>{fmtFecha(c.fecha_esperada)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* ── STOCK BAJO ─────────────────────────────────────────────────── */}
-        <section style={s.seccion}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <SeccionTitulo>Materiales con stock bajo</SeccionTitulo>
-            <span style={s.chipDisabled}>Inventario — disponible próximamente</span>
-          </div>
-          {stockBajo === null && !errores.stockBajo && <p style={s.cargando}>Cargando…</p>}
-          {errores.stockBajo && <Alerta texto="No se pudo cargar el inventario." />}
-          {stockBajo?.length === 0 && <div style={s.vacio}><p style={s.vacioTexto}>Todos los materiales están sobre su stock mínimo.</p></div>}
-          {stockBajo?.length > 0 && (
-            <div style={s.gridStock}>
-              {stockBajo.map(m => {
-                const pct = m.stock_minimo > 0 ? Math.min((m.cantidad / m.stock_minimo) * 100, 100) : 100
-                return (
-                  <div key={m.id} style={s.cardStock}>
-                    <span style={s.stockNombre}>{m.nombre}</span>
-                    <div style={s.stockBarra}><div style={{ ...s.stockBarraFill, width: `${pct}%` }} /></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={s.stockNum}><span style={{ color: 'var(--danger)', fontWeight: 'var(--weight-medium)' }}>{m.cantidad}</span>{' / '}{m.stock_minimo} {m.unidad_medida}</span>
-                      {m.nombre_proveedor && <span style={s.stockProv}>{m.nombre_proveedor}</span>}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </section>
-
-        {/* ── LIQUIDACIONES PENDIENTES ───────────────────────────────────── */}
-        <section style={s.seccion}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <SeccionTitulo>Liquidaciones pendientes</SeccionTitulo>
-            <span style={s.chipDisabled}>Liquidaciones — disponible próximamente</span>
-          </div>
-          {liquidPend === null && !errores.liquidPend && <p style={s.cargando}>Cargando…</p>}
-          {errores.liquidPend && <Alerta texto="No se pudieron cargar las liquidaciones." />}
-          {liquidPend?.length === 0 && <div style={s.vacio}><p style={s.vacioTexto}>No hay montos pendientes de liquidar.</p></div>}
-          {liquidPend?.length > 0 && (
-            <div style={s.tabla}>
-              <div style={{ ...s.tablaHeader, gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-                <span>Personal</span><span>Rol</span><span>Órdenes sin liquidar</span><span>Total pendiente</span>
-              </div>
-              {liquidPend.map(p => (
-                <div key={p.id_personal} style={{ ...s.tablaFila, gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
-                  <span style={s.clienteNombre}>{p.nombre}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)', textTransform: 'capitalize' }}>{p.rol}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-200)' }}>{p.ordenes_sin_liquidar}</span>
-                  <span style={{ fontSize: 'var(--text-small)', color: 'var(--yellow-400)', fontWeight: 'var(--weight-medium)' }}>C$ {fmt(p.total_pendiente)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button onClick={() => navigate('/ordenes')} className="btn-cyber-outline">
+            Ver órdenes →
+          </button>
+          <button onClick={() => navigate('/ordenes/nueva')} className="btn-cyber-orange">
+            ＋ Nueva orden
+          </button>
+        </div>
       </div>
+
+      {/* MÉTRICAS CARDS */}
+      <div className="metric-grid">
+        <MetricCard
+          title="Órdenes Activas"
+          value={metricas?.activas ?? (error ? '—' : null)}
+          subtitle="Vehículos en taller actualmente"
+
+          onClick={() => navigate('/ordenes')}
+          icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>}
+        />
+        <MetricCard
+          title="Listos para Entrega"
+          value={metricas?.listas ?? (error ? '—' : null)}
+          subtitle="Vehículos listos para el cliente"
+          onClick={() => navigate('/ordenes')}
+          icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
+        />
+        <MetricCard
+          title="Ingresadas Hoy"
+          value={metricas?.hoy ?? (error ? '—' : null)}
+          subtitle="Nuevas recepciones"
+          onClick={() => navigate('/ordenes')}
+          icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}
+        />
+        <MetricCard
+          title="Cobros pendientes"
+          value={metricas?.cobros_pendientes != null ? `C$ ${fmt(metricas.cobros_pendientes)}` : (error ? '—' : null)}
+          subtitle="Reclamaciones LAFISE / INISER"
+          icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>}
+        />
+      </div>
+
+      {/* ESTADO EN VIVO CON CHIPS */}
+      <div className="card-cyber" style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ fontSize: '1rem', fontWeight: '800', color: '#f9fafb', margin: 0 }}>
+            Así avanza el taller
+          </h2>
+          <span style={{ fontSize: '0.78rem', color: '#ff9559' }}>Ver órdenes →</span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
+          {breakdown ? Object.entries(ESTADO_STYLES).map(([key, st]) => {
+            const count = breakdown[key] ?? 0
+            return (
+              <div
+                key={key}
+                onClick={() => navigate('/ordenes')}
+                className="card-cyber"
+                style={{
+                  padding: '0.85rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                  backgroundColor: 'rgba(31, 41, 55, 0.6)'
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '1.4rem', fontWeight: '900', color: st.color, lineHeight: 1 }}>
+                    {count}
+                  </span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#9ca3af', marginTop: '0.2rem' }}>
+                    {st.label}
+                  </span>
+                </div>
+                <div style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: st.color, boxShadow: `0 0 10px ${st.color}` }}></div>
+              </div>
+            )
+          }) : <span style={{ color: '#979faa', fontSize: '0.85rem' }}>{error ? 'Datos no disponibles' : 'Cargando datos…'}</span>}
+        </div>
+      </div>
+
+      {/* TABLA DE ÓRDENES ACTIVAS RECIENTES */}
+      <div className="card-cyber" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h2 style={{ fontSize: '1.1rem', fontWeight: '800', color: '#f9fafb', margin: 0 }}>
+            Órdenes recientes
+          </h2>
+          <button onClick={() => navigate('/ordenes')} className="btn-cyber-outline" style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}>
+            Todas las órdenes →
+          </button>
+        </div>
+
+        {recientes && recientes.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#979faa', fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                  <th style={{ padding: '0.75rem 1rem' }}>Matrícula</th>
+                  <th style={{ padding: '0.75rem 1rem' }}>Cliente</th>
+                  <th style={{ padding: '0.75rem 1rem' }}>Trabajo</th>
+                  <th style={{ padding: '0.75rem 1rem' }}>Estado</th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recientes.map(o => (
+                  <tr key={o.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <td style={{ padding: '0.85rem 1rem', fontWeight: '800', color: '#ffac7c' }}>
+                      {o.matricula}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: '#f9fafb', fontWeight: '600' }}>
+                      {o.nombre_cliente}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: '#9ca3af', textTransform: 'capitalize' }}>
+                      {o.tipo}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem' }}>
+                      <span className="badge-cyber badge-cyber-cyan">
+                        {o.estado.replace('_', ' ')}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>
+                      <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
+                        <button
+                          onClick={() => navigate(`/ordenes/${o.id}/operaciones`)}
+                          className="btn-cyber-outline"
+                          style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                        >
+                          Operaciones
+                        </button>
+                        <button
+                          onClick={() => navigate(`/ordenes/${o.id}/pago`)}
+                          className="btn-cyber-orange"
+                          style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                        >
+                          Ver pagos
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ padding: '2rem', textAlign: 'center', color: '#979faa', fontSize: '0.9rem' }}>
+            {recientes === null ? (error ? 'No se pudieron cargar las órdenes.' : 'Cargando órdenes…') : 'No hay órdenes activas registradas.'}
+          </div>
+        )}
+      </div>
+
+      {/* COBROS PENDIENTES */}
+      {cobros && cobros.length > 0 && (
+        <div className="card-cyber" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h2 style={{ fontSize: '1.1rem', fontWeight: '800', color: '#f9fafb', margin: 0 }}>
+              Cobros Pendientes de Aseguradoras
+            </h2>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#979faa', fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                  <th style={{ padding: '0.75rem 1rem' }}>Matrícula</th>
+                  <th style={{ padding: '0.75rem 1rem' }}>Aseguradora</th>
+                  <th style={{ padding: '0.75rem 1rem' }}>Concepto</th>
+                  <th style={{ padding: '0.75rem 1rem' }}>Monto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cobros.map(c => (
+                  <tr key={c.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                    <td style={{ padding: '0.85rem 1rem', fontWeight: '800', color: '#ffac7c' }}>
+                      {c.matricula}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: '#fb923c', fontWeight: '700', textTransform: 'uppercase' }}>
+                      {c.tipo_pago}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: '#9ca3af', textTransform: 'capitalize' }}>
+                      {c.concepto ? c.concepto.replace('_', ' ') : 'Cobro'}
+                    </td>
+                    <td style={{ padding: '0.85rem 1rem', color: '#34d399', fontWeight: '800' }}>
+                      C$ {fmt(c.monto)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ALERTAS STOCK */}
+      {stockBajo && stockBajo.length > 0 && (
+        <div className="card-cyber" style={{ padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', borderLeft: '4px solid #f43f5e' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ color: '#f43f5e' }}>⚠️</span>
+              <h2 style={{ fontSize: '0.95rem', fontWeight: '800', color: '#f9fafb', margin: 0 }}>
+                Materiales con Stock Crítico en Inventario
+              </h2>
+            </div>
+            <button onClick={() => navigate('/inventario')} className="btn-cyber-outline" style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}>
+              Ir a Inventario
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+            {stockBajo.map(m => (
+              <div key={m.id} style={{ backgroundColor: 'rgba(244, 63, 94, 0.08)', border: '1px solid rgba(244, 63, 94, 0.25)', borderRadius: '8px', padding: '0.75rem 1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.825rem', fontWeight: '700', color: '#f9fafb' }}>
+                  <span>{m.nombre}</span>
+                  <span style={{ color: '#fb7185' }}>{m.cantidad} {m.unidad_medida}</span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.2rem' }}>
+                  Stock Mínimo: {m.stock_minimo} {m.unidad_medida}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
 
-const s = {
-  page:              { minHeight: '100vh', backgroundColor: 'var(--background)', padding: '2rem 1.5rem', display: 'flex', justifyContent: 'center' },
-  container:         { width: '100%', maxWidth: '1200px', display: 'flex', flexDirection: 'column', gap: '2.5rem' },
-  header:            { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)' },
-  eyebrow:           { display: 'block', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)', color: 'var(--neutral-400)', letterSpacing: '0.12em', textTransform: 'uppercase' },
-  titulo:            { fontSize: 'var(--text-title)', fontWeight: 'var(--weight-bold)', color: 'var(--foreground)', margin: 0, lineHeight: 1.1 },
-  accent:            { color: 'var(--yellow-500)' },
-  btnPrimario:       { backgroundColor: 'var(--yellow-500)', color: 'var(--background)', fontWeight: 'var(--weight-bold)', fontSize: 'var(--text-body)', padding: '0.65rem 1.25rem', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer' },
-  seccion:           { display: 'flex', flexDirection: 'column', gap: '1rem' },
-  grid4:             { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' },
-  grid5:             { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem' },
-  gridStock:         { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' },
-  cargando:          { fontSize: 'var(--text-small)', color: 'var(--neutral-400)', margin: 0 },
-  vacio:             { backgroundColor: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  vacioTexto:        { fontSize: 'var(--text-body)', color: 'var(--neutral-400)', margin: 0 },
-  btnLink:           { backgroundColor: 'transparent', color: 'var(--yellow-500)', fontSize: 'var(--text-small)', fontWeight: 'var(--weight-medium)', border: 'none', cursor: 'pointer', padding: 0 },
-  chipDisabled:      { fontSize: 'var(--text-xs)', color: 'var(--neutral-400)', backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 'var(--radius-full)', padding: '0.2rem 0.65rem' },
-  tabla:             { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' },
-  tablaHeader:       { display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr 1fr 1fr 1fr 1fr', gap: '0.5rem', padding: '0.65rem 1.25rem', backgroundColor: 'var(--surface-raised)', borderBottom: '1px solid var(--border)', fontSize: 'var(--text-xs)', color: 'var(--neutral-400)', textTransform: 'uppercase', letterSpacing: '0.07em' },
-  tablaFila:         { display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr 1fr 1fr 1fr 1fr', gap: '0.5rem', padding: '0.75rem 1.25rem', borderBottom: '1px solid var(--border)', alignItems: 'center' },
-  matricula:         { fontSize: 'var(--text-body)', fontWeight: 'var(--weight-bold)', color: 'var(--yellow-400)' },
-  clienteNombre:     { fontSize: 'var(--text-small)', color: 'var(--foreground)', fontWeight: 'var(--weight-medium)' },
-  btnTabla:          { backgroundColor: 'var(--surface-raised)', color: 'var(--neutral-200)', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)', padding: '0.3rem 0.6rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', cursor: 'pointer', whiteSpace: 'nowrap' },
-  btnTablaAmarillo:  { backgroundColor: 'var(--yellow-500)', color: 'var(--background)', border: 'none' },
-  cardStock:         { backgroundColor: 'var(--surface)', border: '1px solid rgba(229,72,77,0.25)', borderRadius: 'var(--radius-lg)', padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' },
-  stockNombre:       { fontSize: 'var(--text-small)', fontWeight: 'var(--weight-medium)', color: 'var(--foreground)' },
-  stockBarra:        { height: '4px', backgroundColor: 'var(--surface-raised)', borderRadius: 'var(--radius-full)', overflow: 'hidden' },
-  stockBarraFill:    { height: '100%', backgroundColor: 'var(--danger)', borderRadius: 'var(--radius-full)', transition: 'width 0.4s ease' },
-  stockNum:          { fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' },
-  stockProv:         { fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' },
-  btnAcceso:         { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--foreground)', fontSize: 'var(--text-body)', fontWeight: 'var(--weight-medium)', padding: '0.9rem 1rem', borderRadius: 'var(--radius-lg)', cursor: 'pointer', transition: 'border-color 0.15s' },
-  btnAccesoDisabled: { opacity: 0.4, cursor: 'not-allowed' },
-}
+
+

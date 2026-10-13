@@ -1,9 +1,11 @@
+import { useDeferredLoad } from '../hooks/useDeferredLoad'
+import { apiFetch } from '../lib/api'
 // frontend/src/pages/Operaciones.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 const getToken = () => localStorage.getItem('token')
-const API = 'http://localhost:3001'
+const API = ''
 const fmt = n => Number(n).toLocaleString('es-NI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 // Estados en los que se permite eliminar líneas
@@ -86,18 +88,19 @@ function SeccionServicios({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
   const [creando, setCreando]     = useState(false)
   const [error, setError]         = useState('')
 
-  useEffect(() => { cargar() }, [])
-
-  async function cargar() {
-    const res  = await fetch(`${API}/api/operaciones/${idOrden}/servicios`, { headers: { Authorization: `Bearer ${getToken()}` } })
+  const cargar = useCallback(async () => {
+    try {
+    const res  = await apiFetch(`${API}/api/operaciones/${idOrden}/servicios`, { headers: { Authorization: `Bearer ${getToken()}` } })
     const data = await res.json()
     if (res.ok) setServicios(data)
-  }
+    } catch (err) { setError(err.message) }
+  }, [idOrden])
+  useDeferredLoad(cargar)
 
   async function handleSubmit(e) {
     e.preventDefault(); setError(''); setCreando(true)
     try {
-      const res  = await fetch(`${API}/api/operaciones/${idOrden}/servicios`, {
+      const res  = await apiFetch(`${API}/api/operaciones/${idOrden}/servicios`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(form),
@@ -113,7 +116,7 @@ function SeccionServicios({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
 
   async function handleEliminar(id) {
     setError('')
-    const res = await fetch(`${API}/api/operaciones/servicios/${id}`, {
+    const res = await apiFetch(`${API}/api/operaciones/servicios/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${getToken()}` },
     })
@@ -189,53 +192,33 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
   const [error, setError]                 = useState('')
   const [creando, setCreando]             = useState(false)
 
-  useEffect(() => { cargarTodo() }, [])
-
-  async function cargarTodo() {
+  const cargarTodo = useCallback(async () => {
+    try {
     const headers = { Authorization: `Bearer ${getToken()}` }
     const [rMat, rPers, rInv, rPersL] = await Promise.all([
-      fetch(`${API}/api/operaciones/${idOrden}/materiales`, { headers }),
-      fetch(`${API}/api/operaciones/${idOrden}/personal`, { headers }),
-      fetch(`${API}/api/operaciones/inventario/lista`, { headers }),
-      fetch(`${API}/api/operaciones/personal/lista`, { headers }),
+      apiFetch(`${API}/api/operaciones/${idOrden}/materiales`, { headers }),
+      apiFetch(`${API}/api/operaciones/${idOrden}/personal`, { headers }),
+      apiFetch(`${API}/api/operaciones/inventario/lista`, { headers }),
+      apiFetch(`${API}/api/operaciones/personal/lista`, { headers }),
     ])
     if (rMat.ok)   setMateriales(await rMat.json())
     if (rPers.ok)  setPersonal(await rPers.json())
     if (rInv.ok)   setInventario(await rInv.json())
     if (rPersL.ok) setPersonalLista(await rPersL.json())
-  }
+    } catch (err) { setError(err.message) }
+  }, [idOrden])
+  useDeferredLoad(cargarTodo)
 
   async function handleSubmitMat(e) {
     e.preventDefault(); setError(''); setCreando(true)
     try {
-      if (!formPers.id_personal || !formPers.monto_acordado)
-        throw new Error('Debés asignar personal antes de registrar el material.')
-
-      // 1. Registrar material
-      const resMat = await fetch(`${API}/api/operaciones/${idOrden}/materiales`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify(formMat),
+      const resMat = await apiFetch('/api/operaciones/' + idOrden + '/materiales', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+        body: JSON.stringify({ ...formMat, ...(formPers.id_personal ? { id_personal: formPers.id_personal } : {}), ...(formPers.monto_acordado !== '' ? { monto_acordado: formPers.monto_acordado } : {}) }),
       })
       const dataMat = await resMat.json()
       if (!resMat.ok) throw new Error(dataMat.message)
-
-      // 2. Registrar personal — si falla, revertir el material
-      const resPers = await fetch(`${API}/api/operaciones/${idOrden}/personal`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify(formPers),
-      })
-      const dataPers = await resPers.json()
-      if (!resPers.ok) {
-        // FIX: revertir el material ya guardado para no dejar stock descontado sin personal
-        await fetch(`${API}/api/operaciones/materiales/${dataMat.id}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${getToken()}` },
-        })
-        throw new Error(`El material se guardó pero el personal falló y fue revertido. Error: ${dataPers.message}`)
-      }
-
-      setMateriales(prev => [...prev, dataMat])
-      setPersonal(prev => [...prev, dataPers])
+      await cargarTodo()
       setFormMat({ id_material: '', cantidad_usada: '' })
       setFormPers({ id_personal: '', monto_acordado: '' })
       onOperacionHecha()
@@ -245,7 +228,7 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
 
   async function handleCrearPersonal(e) {
     e.preventDefault()
-    const res  = await fetch(`${API}/api/operaciones/personal`, {
+    const res  = await apiFetch(`${API}/api/operaciones/personal`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
       body: JSON.stringify(formNuevoPers),
     })
@@ -260,7 +243,7 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
 
   async function handleEliminarMat(id) {
     setError('')
-    const res = await fetch(`${API}/api/operaciones/materiales/${id}`, {
+    const res = await apiFetch(`${API}/api/operaciones/materiales/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${getToken()}` },
     })
@@ -275,7 +258,7 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
 
   async function handleEliminarPers(id) {
     setError('')
-    const res = await fetch(`${API}/api/operaciones/personal-asignado/${id}`, {
+    const res = await apiFetch(`${API}/api/operaciones/personal-asignado/${id}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${getToken()}` },
     })
@@ -289,6 +272,18 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
 
   const fijos = personalLista.filter(p => p.fijo)
   const otros  = personalLista.filter(p => !p.fijo)
+
+  async function guardarManoObra() {
+    if (creando) return
+    setCreando(true); setError('')
+    try {
+      const res = await apiFetch(`/api/operaciones/${idOrden}/personal`, { method: 'POST', headers: { 'Content-Type':'application/json', Authorization:`Bearer ${getToken()}` }, body: JSON.stringify(formPers) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message)
+      setFormPers({ id_personal:'', monto_acordado:'' })
+      await cargarTodo()
+    } catch (err) { setError(err.message) } finally { setCreando(false) }
+  }
 
   return (
     <div style={s.seccionInterna}>
@@ -312,7 +307,8 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
               onBlur={e  => Object.assign(e.target.style, s.input)} />
           </Campo>
 
-          <p style={s.seccionSubtitulo}>Personal</p>
+          <p style={s.seccionSubtitulo}>Personal (opcional para el consumo)</p>
+          <p style={s.vacio}>Puedes registrar solo mano de obra o añadirla junto al consumo. Deja el monto vacío si ya fue acordado y registrado.</p>
           {fijos.length > 0 && (
             <div style={s.fijosRow}>
               {fijos.map(p => (
@@ -389,8 +385,9 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
 
           {error && <p style={s.err}>{error}</p>}
           <button onClick={handleSubmitMat} disabled={creando} style={creando ? s.btnDisabled : s.btnPrimary}>
-            {creando ? 'Registrando...' : 'Registrar material + personal'}
+            {creando ? 'Registrando...' : 'Registrar consumo'}
           </button>
+          <button type="button" onClick={guardarManoObra} disabled={creando || !formPers.id_personal || formPers.monto_acordado === ''} style={s.btnSecondary}>Guardar solo mano de obra</button>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -402,6 +399,7 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
                 <div key={m.id} style={s.filaItem}>
                   <div style={s.filaItemMain}>
                     <span style={s.itemDesc}>{m.nombre_material}</span>
+                    {m.responsable && <span style={s.itemMeta}>Usado por {m.responsable}{m.nota ? ` · ${m.nota}` : ''}</span>}
                     <span style={s.itemVal}>×{m.cantidad_usada} {m.unidad_medida}</span>
                     <span style={s.itemVal}>C$ {fmt(m.precio_unitario)}</span>
                   </div>
@@ -433,7 +431,7 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
 }
 
 // ─── sección repuestos + personal ─────────────────────────────────────────────
-function SeccionRepuestos({ idOrden, estadoOrden, onOperacionHecha, onTotalesActualizados }) {
+function SeccionRepuestos({ idOrden, onOperacionHecha }) {
   const [repuestos, setRepuestos]         = useState([])
   const [personal, setPersonal]           = useState([])
   const [lista, setLista]                 = useState([])
@@ -445,21 +443,22 @@ function SeccionRepuestos({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
   const [error, setError]                 = useState('')
   const [creando, setCreando]             = useState(false)
 
-  useEffect(() => { cargarTodo() }, [])
-
-  async function cargarTodo() {
+  const cargarTodo = useCallback(async () => {
+    try {
     const headers = { Authorization: `Bearer ${getToken()}` }
     const [rRep, rPers, rLista, rPersL] = await Promise.all([
-      fetch(`${API}/api/operaciones/${idOrden}/repuestos`, { headers }),
-      fetch(`${API}/api/operaciones/${idOrden}/personal`, { headers }),
-      fetch(`${API}/api/operaciones/repuestos/lista`, { headers }),
-      fetch(`${API}/api/operaciones/personal/lista`, { headers }),
+      apiFetch(`${API}/api/operaciones/${idOrden}/repuestos`, { headers }),
+      apiFetch(`${API}/api/operaciones/${idOrden}/personal`, { headers }),
+      apiFetch(`${API}/api/operaciones/repuestos/lista`, { headers }),
+      apiFetch(`${API}/api/operaciones/personal/lista`, { headers }),
     ])
     if (rRep.ok)   setRepuestos(await rRep.json())
     if (rPers.ok)  setPersonal(await rPers.json())
     if (rLista.ok) setLista(await rLista.json())
     if (rPersL.ok) setPersonalLista(await rPersL.json())
-  }
+    } catch (err) { setError(err.message) }
+  }, [idOrden])
+  useDeferredLoad(cargarTodo)
 
   async function handleSubmit(e) {
     e.preventDefault(); setError(''); setCreando(true)
@@ -468,7 +467,7 @@ function SeccionRepuestos({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
         throw new Error('Debés asignar personal.')
 
       // 1. Registrar repuesto
-      const resRep = await fetch(`${API}/api/operaciones/${idOrden}/repuestos`, {
+      const resRep = await apiFetch(`${API}/api/operaciones/${idOrden}/repuestos`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(formRep),
       })
@@ -476,7 +475,7 @@ function SeccionRepuestos({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
       if (!resRep.ok) throw new Error(dataRep.message)
 
       // 2. Registrar personal — si falla, informar (no hay DELETE de repuesto implementado aún)
-      const resPers = await fetch(`${API}/api/operaciones/${idOrden}/personal`, {
+      const resPers = await apiFetch(`${API}/api/operaciones/${idOrden}/personal`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(formPers),
       })
@@ -498,7 +497,7 @@ function SeccionRepuestos({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
 
   async function handleCrearPersonal(e) {
     e.preventDefault()
-    const res  = await fetch(`${API}/api/operaciones/personal`, {
+    const res  = await apiFetch(`${API}/api/operaciones/personal`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
       body: JSON.stringify(formNuevoPers),
     })
@@ -654,17 +653,18 @@ function SeccionDanos({ idOrden, tipoPago, onOperacionHecha, navigate }) {
   const [error, setError]     = useState('')
   const esSeguro = tipoPago === 'lafise' || tipoPago === 'iniser'
 
-  useEffect(() => { cargar() }, [])
-
-  async function cargar() {
-    const res = await fetch(`${API}/api/operaciones/${idOrden}/danos`, { headers: { Authorization: `Bearer ${getToken()}` } })
+  const cargar = useCallback(async () => {
+    try {
+    const res = await apiFetch(`${API}/api/operaciones/${idOrden}/danos`, { headers: { Authorization: `Bearer ${getToken()}` } })
     if (res.ok) setDanos(await res.json())
-  }
+    } catch (err) { setError(err.message) }
+  }, [idOrden])
+  useDeferredLoad(cargar)
 
   async function handleSubmit(e) {
     e.preventDefault(); setError(''); setCreando(true)
     try {
-      const res  = await fetch(`${API}/api/operaciones/${idOrden}/danos`, {
+      const res  = await apiFetch(`${API}/api/operaciones/${idOrden}/danos`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(form),
       })
@@ -684,7 +684,7 @@ function SeccionDanos({ idOrden, tipoPago, onOperacionHecha, navigate }) {
     setNavegando(true)
     setErrorNav('')
     try {
-      const res = await fetch(`${API}/api/ordenes/${idOrden}`, {
+      const res = await apiFetch(`${API}/api/ordenes/${idOrden}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       if (!res.ok) throw new Error('No se pudo cargar la orden.')
@@ -830,6 +830,7 @@ export default function Operaciones() {
   const navigate = useNavigate()
 
   const [orden, setOrden]                = useState(null)
+  const [errorCarga, setErrorCarga] = useState('')
   const [totales, setTotales]            = useState(null)
   const [loading, setLoading]            = useState(true)
   const [seccionAbierta, setSeccion]     = useState(null)
@@ -837,33 +838,49 @@ export default function Operaciones() {
 
   useEffect(() => {
     async function cargar() {
+      try {
       const headers = { Authorization: `Bearer ${getToken()}` }
-      const res = await fetch(`${API}/api/ordenes/${id}`, { headers })
-      if (res.ok) setOrden(await res.json())
+      const res = await apiFetch(`${API}/api/ordenes/${id}`, { headers })
+      const dataOrden = await res.json()
+      if (!res.ok) throw new Error(dataOrden.message || 'No se pudo cargar la orden.')
+      setOrden(dataOrden)
 
-      const rTotales = await fetch(`${API}/api/operaciones/${id}/recalcular`, {
+      const rTotales = await apiFetch(`${API}/api/operaciones/${id}/recalcular`, {
         method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
       })
-      if (rTotales.ok) setTotales(await rTotales.json())
+      const dataTotales = await rTotales.json()
+      if (!rTotales.ok) throw new Error(dataTotales.message || 'No se pudieron cargar los totales.')
+      setTotales(dataTotales)
 
-      setLoading(false)
+      } catch (err) { setErrorCarga(err.message) }
+      finally { setLoading(false) }
     }
     cargar()
   }, [id])
 
   function actualizarTotales() {
-    fetch(`${API}/api/operaciones/${id}/recalcular`, {
+    apiFetch(`${API}/api/operaciones/${id}/recalcular`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
     })
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setTotales(data) })
+      .catch(err => setErrorCarga(err.message))
   }
 
   function toggle(nombre) { setSeccion(prev => prev === nombre ? null : nombre) }
-  function operacionHecha() { setModalPago(true); actualizarTotales() }
+  async function operacionHecha() {
+    actualizarTotales()
+    try {
+      const res = await apiFetch(`/api/pagos/${id}/resumen`, { headers: { Authorization: `Bearer ${getToken()}` } })
+      const balance = await res.json()
+      if (!res.ok) throw new Error(balance.message)
+      setModalPago(balance.puede_cobrar_cliente || balance.puede_cobrar_seguro)
+    } catch (err) { setErrorCarga(err.message) }
+  }
 
   if (loading) return <div style={s.page}><p style={{ color: 'var(--neutral-300)', padding: '2rem' }}>Cargando orden...</p></div>
+  if (errorCarga) return <div style={s.page}><p role="alert" className="login-error">{errorCarga}</p><button className="btn-cyber-outline" onClick={() => navigate('/ordenes')}>Volver a órdenes</button></div>
   if (!orden)  return <div style={s.page}><p style={{ color: 'var(--danger)', padding: '2rem' }}>Orden no encontrada.</p></div>
 
   return (
@@ -882,6 +899,7 @@ export default function Operaciones() {
         </div>
 
         <EncabezadoOrden orden={orden} />
+        <button onClick={() => navigate(`/ordenes/${id}/expediente`)} style={s.btnSecondary}>Fotos, costos y entrega</button>
 
         {/* ── card de totales ── */}
         {totales && (
@@ -1006,3 +1024,8 @@ const s = {
   modalTitulo:      { fontSize: 'var(--text-body-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--foreground)', margin: 0 },
   modalTexto:       { fontSize: 'var(--text-body)', color: 'var(--text-tertiary)', margin: 0, lineHeight: 1.6 },
 }
+
+
+
+
+

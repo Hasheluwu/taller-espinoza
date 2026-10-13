@@ -11,6 +11,12 @@ import IngresarOrdenFinal      from './pages/IngresarOrdenFinal'
 import VerOrdenes              from './pages/VerOrdenes'
 import Operaciones             from './pages/Operaciones'
 import Pagos                   from './pages/Pagos'
+import Inventario              from './pages/Inventario'
+import Repuestos               from './pages/Repuestos'
+import Historial from './pages/Historial'
+import Agenda from './pages/Agenda'
+import Expediente from './pages/Expediente'
+import Liquidaciones from './pages/Liquidaciones'
 
 // ─── ruta protegida ───────────────────────────────────────────────────────────
 function PrivateRoute({ children }) {
@@ -30,6 +36,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/liquidaciones" element={<PrivateRoute><Liquidaciones /></PrivateRoute>} />
+        <Route path="/historial" element={<PrivateRoute><Historial /></PrivateRoute>} />
+        <Route path="/agenda" element={<PrivateRoute><Agenda /></PrivateRoute>} />
+        <Route path="/ordenes/:id/expediente" element={<PrivateRoute><Expediente /></PrivateRoute>} />
 
         {/* ── pública ── */}
         <Route path="/login" element={
@@ -67,6 +77,14 @@ export default function App() {
         } />
         <Route path="/ordenes/:id/pago" element={
           <PrivateRoute><Pagos /></PrivateRoute>
+        } />
+
+        <Route path="/inventario" element={
+          <PrivateRoute><Inventario /></PrivateRoute>
+        } />
+
+        <Route path="/repuestos" element={
+          <PrivateRoute><Repuestos /></PrivateRoute>
         } />
 
         {/* fallback */}

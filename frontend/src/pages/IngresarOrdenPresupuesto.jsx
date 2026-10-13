@@ -1,5 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useDeferredLoad } from '../hooks/useDeferredLoad'
+import { apiFetch } from '../lib/api'
+import { useState, useCallback, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import WizardSteps from '../components/WizardSteps'
 
 const IVA_RATE = 0.15
 const getToken = () => localStorage.getItem('token')
@@ -120,15 +123,11 @@ export default function IngresarOrdenPresupuesto() {
 
   const detallesRef = useRef(null)
 
-  useEffect(() => {
+  const cargarPresupuestos = useCallback(async () => {
     if (!vehiculo) return
-    cargarPresupuestos()
-  }, [vehiculo])
-
-  async function cargarPresupuestos() {
     try {
-      const res  = await fetch(
-        `http://localhost:3001/api/presupuestos?id_vehiculo=${vehiculo.id}`,
+      const res  = await apiFetch(
+        `/api/presupuestos?id_vehiculo=${vehiculo.id}`,
         { headers: { Authorization: `Bearer ${getToken()}` } }
       )
       const data = await res.json()
@@ -137,7 +136,8 @@ export default function IngresarOrdenPresupuesto() {
         setHayPresupuesto(data.length > 0)
       }
     } catch { /* silencioso */ }
-  }
+  }, [vehiculo])
+  useDeferredLoad(cargarPresupuestos)
 
   async function seleccionarPresupuesto(p) {
     if (presupuestoActivo?.id === p.id) {
@@ -148,8 +148,8 @@ export default function IngresarOrdenPresupuesto() {
     setPresupuestoActivo(p)
     setErrorDet('')
     try {
-      const res  = await fetch(
-        `http://localhost:3001/api/presupuestos/${p.id}/detalles`,
+      const res  = await apiFetch(
+        `/api/presupuestos/${p.id}/detalles`,
         { headers: { Authorization: `Bearer ${getToken()}` } }
       )
       const data = await res.json()
@@ -178,7 +178,7 @@ export default function IngresarOrdenPresupuesto() {
     setErrorPres('')
     setCreandoPres(true)
     try {
-      const res  = await fetch('http://localhost:3001/api/presupuestos', {
+      const res  = await apiFetch('/api/presupuestos', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body:    JSON.stringify({ id_vehiculo: vehiculo.id, subtotal: subtotalInput, observaciones: obsInput }),
@@ -226,8 +226,8 @@ export default function IngresarOrdenPresupuesto() {
 
     setCreandoDet(true)
     try {
-      const res  = await fetch(
-        `http://localhost:3001/api/presupuestos/${presupuestoActivo.id}/detalles`,
+      const res  = await apiFetch(
+        `/api/presupuestos/${presupuestoActivo.id}/detalles`,
         {
           method:  'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
@@ -247,7 +247,7 @@ export default function IngresarOrdenPresupuesto() {
 
   async function handleEliminarDetalle(id) {
     try {
-      await fetch(`http://localhost:3001/api/presupuestos/detalles/${id}`, {
+      await apiFetch(`/api/presupuestos/detalles/${id}`, {
         method:  'DELETE',
         headers: { Authorization: `Bearer ${getToken()}` },
       })
@@ -281,6 +281,8 @@ export default function IngresarOrdenPresupuesto() {
   return (
     <div style={s.page}>
       <div style={s.container}>
+
+        <WizardSteps currentStep={3} />
 
         <div style={s.header}>
           <span style={s.eyebrow}>Ruta 1 — Paso 3 de 4</span>
@@ -627,3 +629,4 @@ const s = {
 
   errorMsg:          { fontSize: 'var(--text-small)', color: 'var(--danger)', backgroundColor: 'var(--danger-bg)', border: '1px solid rgba(229,72,77,0.25)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', margin: 0 },
 }
+

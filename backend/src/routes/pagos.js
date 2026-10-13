@@ -1,360 +1,152 @@
-// backend/src/routes/pagos.js
-const express     = require('express')
-const pool        = require('../db')
+const express = require('express')
+const pool = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
-
+const { fail, cents } = require('../services/validation')
+const { summary, validatePayment, lockOrder } = require('../services/billing')
 const router = express.Router()
+router.use(require('../middleware/validateNumbers'))
+router.use(requireAuth)
 
-// Estados en los que aún se puede modificar una orden
-const ESTADOS_EDITABLES = ['recibido', 'en_proceso']
-
-// ═══════════════════════════════════════════════════════════
-// RESUMEN DE PAGOS DE UNA ORDEN
-// GET /api/pagos/:id_orden/resumen
-// ═══════════════════════════════════════════════════════════
-router.get('/:id_orden/resumen', requireAuth, async (req, res) => {
-  try {
-    const { id_orden } = req.params
-
-    const [pagosCliente] = await pool.query(
-      'SELECT * FROM pago_cliente WHERE id_orden = ? ORDER BY fecha ASC',
-      [id_orden]
-    )
-    const [pagosSeguro] = await pool.query(
-      'SELECT * FROM pago_seguro WHERE id_orden = ? ORDER BY id ASC',
-      [id_orden]
-    )
-
-    const totalCliente    = pagosCliente.reduce((s, p) => s + parseFloat(p.monto), 0)
-    const totalSeguro     = pagosSeguro.reduce((s, p) => s + parseFloat(p.monto), 0)
-    const seguroRecibido  = pagosSeguro
-      .filter(p => p.estado === 'recibido')
-      .reduce((s, p) => s + parseFloat(p.monto), 0)
-    const seguroPendiente = pagosSeguro
-      .filter(p => p.estado === 'pendiente')
-      .reduce((s, p) => s + parseFloat(p.monto), 0)
-
-    res.json({
-      pagos_cliente:    pagosCliente,
-      pagos_seguro:     pagosSeguro,
-      total_cliente:    totalCliente,
-      total_seguro:     totalSeguro,
-      seguro_recibido:  seguroRecibido,
-      seguro_pendiente: seguroPendiente,
-      gran_total:       totalCliente + seguroRecibido,
-    })
-  } catch (err) {
-    console.error('Error al obtener resumen de pagos:', err)
-    res.status(500).json({ message: 'Error interno del servidor.' })
+// All payment writes lock the same order before reading balances, so concurrent
+// abonos cannot both spend the last available balance.
+function transaction(action) {
+  return async (req, res, next) => {
+    let conn
+    try {
+      conn = await pool.getConnection()
+      await conn.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED')
+      await conn.beginTransaction()
+      const result = await action(conn, req)
+      await conn.commit()
+      res.status(result.status || 200).json(result.data)
+    } catch (err) {
+      if (conn) await conn.rollback()
+      next(err)
+    } finally { if (conn) conn.release() }
   }
-})
+}
+async function audit(conn, req, table, id, action, detail) {
+  await conn.query('INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle) VALUES (?, ?, ?, ?, ?)', [req.usuario.id, table, id, action, detail])
+}
+async function findPayment(conn, table, id) {
+  const [rows] = await conn.query(`SELECT * FROM ${table} WHERE id = ?`, [id])
+  if (!rows.length) fail('Pago no encontrado.', 404)
+  return rows[0]
+}
+function allowExcess(req, amount, available) {
+  if (cents(amount) <= cents(available)) return ''
+  if (req.usuario.rol !== 'administrador' || req.body.confirmar_excedente !== true || typeof req.body.motivo_excedente !== 'string' || req.body.motivo_excedente.trim().length < 5 || req.body.motivo_excedente.length > 500) fail(`El importe excede el saldo del seguro de C$ ${Number(available).toFixed(2)}. Corrige el cobro o confirma el excedente como administrador con una justificación.`, 409)
+  return ` Excedente por conciliar: C$ ${(cents(amount)-cents(available))/100}. Motivo: ${req.body.motivo_excedente.trim()}`
+}
+router.get('/:id_orden/resumen', transaction(async (conn, req) => {
+  const order = await lockOrder(conn, req.params.id_orden)
+  return { data: await summary(conn, order) }
+}))
 
-// ═══════════════════════════════════════════════════════════
-// PAGOS DEL CLIENTE
-// POST /api/pagos/:id_orden/cliente
-// ═══════════════════════════════════════════════════════════
-router.post('/:id_orden/cliente', requireAuth, async (req, res) => {
-  const { id_orden } = req.params
+router.put('/:id_orden/distribucion', transaction(async (conn, req) => {
+  const order = await lockOrder(conn, req.params.id_orden, true)
+  if (!['lafise', 'iniser'].includes(order.tipo_pago)) fail('Esta orden no tiene aseguradora.')
+  const client = cents(req.body.monto_cliente, 'Parte del cliente')
+  const insurance = cents(req.body.monto_seguro, 'Parte del seguro')
+  if (order.costo_total == null || client + insurance !== cents(order.costo_total)) fail('Cliente y seguro deben sumar exactamente el total de la orden.')
+  const balance = await summary(conn, order)
+  if (client < cents(balance.total_cliente) || insurance < cents(balance.total_seguro)) fail('La distribución no puede ser menor que los pagos o cobros ya registrados.', 409)
+  await conn.query('UPDATE orden SET monto_cliente = ?, monto_seguro = ? WHERE id = ?', [client / 100, insurance / 100, order.id])
+  await audit(conn, req, 'orden', order.id, 'editar', `Distribución: cliente ${client / 100}, seguro ${insurance / 100}`)
+  return { data: await summary(conn, { ...order, monto_cliente: client / 100, monto_seguro: insurance / 100 }) }
+}))
+
+router.post('/:id_orden/cliente', transaction(async (conn, req) => {
   const { monto, fecha, tipo, metodo, numero_recibo } = req.body
+  if (!['adelanto', 'abono', 'saldo'].includes(tipo)) fail('Tipo de pago inválido.')
+  if (!['efectivo', 'transferencia', 'otro'].includes(metodo)) fail('Método de pago inválido.')
+  const order = await lockOrder(conn, req.params.id_orden)
+  const amount = validatePayment(order, await summary(conn, order), monto, 'cliente')
+  const [result] = await conn.query(
+    'INSERT INTO pago_cliente (id_orden, monto, fecha, tipo, metodo, numero_recibo, registrado_por) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [order.id, amount, fecha || new Date(), tipo, metodo, numero_recibo?.trim() || null, req.usuario.id]
+  )
+  await audit(conn, req, 'pago_cliente', result.insertId, 'crear', `Pago ${tipo}: C$ ${amount} por ${metodo}`)
+  const payment = await findPayment(conn, 'pago_cliente', result.insertId)
+  return { status: 201, data: { ...payment, resumen: await summary(conn, order) } }
+}))
 
-  if (!monto || !tipo || !metodo) {
-    return res.status(400).json({ message: 'Faltan campos obligatorios: monto, tipo, método.' })
+router.post('/:id_orden/seguro', transaction(async (conn, req) => {
+  const { monto, fecha_esperada, fecha_recibido, referencia_bancaria, concepto, estado = 'pendiente' } = req.body
+  if (!['pago_principal', 'dano_oculto', 'otro'].includes(concepto)) fail('Concepto inválido.')
+  if (!['pendiente', 'recibido'].includes(estado)) fail('Estado inválido.')
+  const order = await lockOrder(conn, req.params.id_orden)
+  const balance = await summary(conn, order)
+  let amount, extra = ''
+  if (req.body.confirmar_excedente === true) {
+    if (!balance.configurado || order.estado === 'cancelado' || !['lafise','iniser'].includes(order.tipo_pago)) fail('Revisa el estado y distribución de la orden.',409)
+    amount = cents(monto, 'Monto', true) / 100
+    extra = allowExcess(req, amount, balance.disponible_seguro)
+  } else amount = validatePayment(order, balance, monto, 'seguro')
+  const [result] = await conn.query(
+    'INSERT INTO pago_seguro (id_orden, monto, fecha_esperada, fecha_recibido, estado, referencia_bancaria, concepto) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [order.id, amount, fecha_esperada || null, estado === 'recibido' ? (fecha_recibido || new Date()) : null, estado, referencia_bancaria?.trim() || null, concepto]
+  )
+  await audit(conn, req, 'pago_seguro', result.insertId, 'crear', `Cobro al seguro: C$ ${amount}, ${estado}.${extra}`)
+  const payment = await findPayment(conn, 'pago_seguro', result.insertId)
+  return { status: 201, data: { ...payment, resumen: await summary(conn, order) } }
+}))
+
+router.patch('/seguro/:id/estado', transaction(async (conn, req) => {
+  if (req.body.estado !== 'recibido') fail('Solo se permite confirmar un cobro pendiente como recibido.')
+  const reference = await findPayment(conn, 'pago_seguro', req.params.id)
+  const order = await lockOrder(conn, reference.id_orden)
+  const payment = await findPayment(conn, 'pago_seguro', req.params.id)
+  const balance = await summary(conn, order)
+  if (payment.estado !== 'recibido') {
+    if (order.estado === 'cancelado' || !balance.configurado) fail('Revisa el estado y la distribución de la orden.', 409)
+    const extra = allowExcess(req, payment.monto, balance.saldo_seguro)
+    await conn.query('UPDATE pago_seguro SET estado = ?, fecha_recibido = ?, referencia_bancaria = ? WHERE id = ?',
+      ['recibido', req.body.fecha_recibido || new Date(), req.body.referencia_bancaria?.trim() || null, payment.id])
+    await audit(conn, req, 'pago_seguro', payment.id, 'cambio_estado', 'Cobro confirmado como recibido.' + extra)
   }
+  return { data: { ...await findPayment(conn, 'pago_seguro', payment.id), resumen: await summary(conn, order) } }
+}))
 
-  const tiposValidos   = ['adelanto', 'abono', 'saldo']
-  const metodosValidos = ['efectivo', 'transferencia', 'otro']
-  if (!tiposValidos.includes(tipo))     return res.status(400).json({ message: 'Tipo de pago inválido.' })
-  if (!metodosValidos.includes(metodo)) return res.status(400).json({ message: 'Método de pago inválido.' })
+router.put('/seguro/:id/pendiente', requireAuth.admin, transaction(async (conn,req) => {
+  const reference = await findPayment(conn,'pago_seguro',req.params.id)
+  const order = await lockOrder(conn,reference.id_orden)
+  const payment = await findPayment(conn,'pago_seguro',req.params.id)
+  if(payment.estado !== 'pendiente' || order.estado === 'cancelado') fail('Solo se puede corregir un cobro pendiente de una orden no cancelada.',409)
+  const amount = cents(req.body.monto,'Monto',true)/100
+  if(typeof req.body.motivo !== 'string' || req.body.motivo.trim().length < 5 || req.body.motivo.length > 500) fail('Describe el motivo de la corrección.')
+  const balance = await summary(conn,order)
+  const available = Math.max(0,Number(balance.saldo_seguro)-Number(balance.seguro_pendiente)+Number(payment.monto))
+  if(!balance.configurado || amount > available) fail('El monto corregido supera el saldo disponible del seguro.',409)
+  await conn.query('UPDATE pago_seguro SET monto = ? WHERE id = ?',[amount,payment.id])
+  await audit(conn,req,'pago_seguro',payment.id,'editar',`Corrección de pendiente de C$ ${payment.monto} a C$ ${amount}: ${req.body.motivo.trim()}`)
+  return {data:{...await findPayment(conn,'pago_seguro',payment.id),resumen:await summary(conn,order)}}
+}))
 
-  const conn = await pool.getConnection()
-  try {
-    await conn.beginTransaction()
+// Removing an erroneous payment is restricted to administrators and unpaid,
+// editable orders. Paid receipts remain in history and can still be printed.
+for (const [path, table, payer] of [['cliente', 'pago_cliente', 'cliente'], ['seguro', 'pago_seguro', 'seguro']]) {
+  router.delete(`/${path}/:id`, requireAuth.admin, transaction(async (conn, req) => {
+    const reference = await findPayment(conn, table, req.params.id)
+    const order = await lockOrder(conn, reference.id_orden, true)
+    const payment = await findPayment(conn, table, req.params.id)
+    const balance = await summary(conn, order)
+    if (balance.pagado || (payer === 'cliente' ? balance.cliente_pagado : balance.seguro_pagado)) fail('La cuenta está pagada. No se puede eliminar el pago desde este flujo.', 409)
+    await conn.query(`DELETE FROM ${table} WHERE id = ?`, [payment.id])
+    await audit(conn, req, table, payment.id, 'eliminar', `Corrección de pago: C$ ${payment.monto}, orden #${order.id}`)
+    return { data: { message: 'Pago eliminado.', resumen: await summary(conn, order) } }
+  }))
+}
 
-    const [result] = await conn.query(
-      `INSERT INTO pago_cliente (id_orden, monto, fecha, tipo, metodo, numero_recibo, registrado_por)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id_orden,
-        parseFloat(monto),
-        fecha || new Date(),
-        tipo,
-        metodo,
-        numero_recibo?.trim() || null,
-        req.usuario.id,
-      ]
-    )
-
-    await conn.query(
-      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
-       VALUES (?, 'pago_cliente', ?, 'crear', ?)`,
-      [req.usuario.id, result.insertId, `Pago ${tipo} de C$ ${monto} por ${metodo}`]
-    )
-
-    await conn.commit()
-
-    const [nuevo] = await conn.query(
-      'SELECT * FROM pago_cliente WHERE id = ?',
-      [result.insertId]
-    )
-    res.status(201).json(nuevo[0])
-  } catch (err) {
-    await conn.rollback()
-    console.error('Error al registrar pago de cliente:', err)
-    res.status(500).json({ message: 'Error interno del servidor.' })
-  } finally {
-    conn.release()
-  }
+// Both entry points use exactly the same status and audit logic.
+const changeOrderState = require('../handlers/changeOrderState')(pool)
+router.patch('/:id_orden/entregar', (req, res) => {
+  req.params.id = req.params.id_orden
+  req.body = { ...req.body, estado: 'entregado' }
+  return changeOrderState(req, res)
 })
-
-// ───────────────────────────────────────────────────────────
-// DELETE /api/pagos/cliente/:id
-// Verifica existencia y que la orden aún sea editable.
-// ───────────────────────────────────────────────────────────
-router.delete('/cliente/:id', requireAuth, async (req, res) => {
-  const conn = await pool.getConnection()
-  try {
-    await conn.beginTransaction()
-
-    // 1. Verificar que el pago existe
-    const [rows] = await conn.query(
-      'SELECT pc.*, o.estado AS estado_orden FROM pago_cliente pc JOIN orden o ON o.id = pc.id_orden WHERE pc.id = ?',
-      [req.params.id]
-    )
-    if (rows.length === 0) {
-      await conn.rollback()
-      return res.status(404).json({ message: 'Pago no encontrado.' })
-    }
-
-    // 2. Verificar que la orden todavía permite modificaciones
-    const pago = rows[0]
-    if (!ESTADOS_EDITABLES.includes(pago.estado_orden)) {
-      await conn.rollback()
-      return res.status(400).json({
-        message: `No se puede eliminar el pago porque la orden está en estado "${pago.estado_orden}".`,
-      })
-    }
-
-    // 3. Eliminar
-    await conn.query('DELETE FROM pago_cliente WHERE id = ?', [req.params.id])
-
-    await conn.query(
-      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
-       VALUES (?, 'pago_cliente', ?, 'eliminar', ?)`,
-      [req.usuario.id, req.params.id, `Pago eliminado de orden #${pago.id_orden} — monto C$ ${pago.monto}`]
-    )
-
-    await conn.commit()
-    res.json({ message: 'Pago eliminado.' })
-  } catch (err) {
-    await conn.rollback()
-    console.error(err)
-    res.status(500).json({ message: 'Error interno del servidor.' })
-  } finally {
-    conn.release()
-  }
-})
-
-// ═══════════════════════════════════════════════════════════
-// PAGOS DE ASEGURADORA
-// POST /api/pagos/:id_orden/seguro
-// ═══════════════════════════════════════════════════════════
-router.post('/:id_orden/seguro', requireAuth, async (req, res) => {
-  const { id_orden } = req.params
-  const { monto, fecha_esperada, fecha_recibido, estado, referencia_bancaria, concepto } = req.body
-
-  if (!monto || !concepto) {
-    return res.status(400).json({ message: 'Faltan campos obligatorios: monto, concepto.' })
-  }
-
-  const conceptosValidos = ['pago_principal', 'dano_oculto', 'otro']
-  const estadosValidos   = ['pendiente', 'recibido']
-  if (!conceptosValidos.includes(concepto))             return res.status(400).json({ message: 'Concepto inválido.' })
-  if (estado && !estadosValidos.includes(estado))       return res.status(400).json({ message: 'Estado inválido.' })
-
-  const conn = await pool.getConnection()
-  try {
-    await conn.beginTransaction()
-
-    const [result] = await conn.query(
-      `INSERT INTO pago_seguro (id_orden, monto, fecha_esperada, fecha_recibido, estado, referencia_bancaria, concepto)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id_orden,
-        parseFloat(monto),
-        fecha_esperada         || null,
-        fecha_recibido         || null,
-        estado                 || 'pendiente',
-        referencia_bancaria?.trim() || null,
-        concepto,
-      ]
-    )
-
-    await conn.query(
-      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
-       VALUES (?, 'pago_seguro', ?, 'crear', ?)`,
-      [
-        req.usuario.id,
-        result.insertId,
-        `Cobro al seguro registrado — C$ ${monto} — concepto: ${concepto} — estado: ${estado || 'pendiente'}`,
-      ]
-    )
-
-    await conn.commit()
-
-    const [nuevo] = await conn.query('SELECT * FROM pago_seguro WHERE id = ?', [result.insertId])
-    res.status(201).json(nuevo[0])
-  } catch (err) {
-    await conn.rollback()
-    console.error('Error al registrar pago de seguro:', err)
-    res.status(500).json({ message: 'Error interno del servidor.' })
-  } finally {
-    conn.release()
-  }
-})
-
-// ───────────────────────────────────────────────────────────
-// PATCH /api/pagos/seguro/:id/estado — marcar como recibido
-// ───────────────────────────────────────────────────────────
-router.patch('/seguro/:id/estado', requireAuth, async (req, res) => {
-  const { estado, fecha_recibido, referencia_bancaria } = req.body
-
-  if (!['pendiente', 'recibido'].includes(estado)) {
-    return res.status(400).json({ message: 'Estado inválido.' })
-  }
-
-  const conn = await pool.getConnection()
-  try {
-    await conn.beginTransaction()
-
-    // 1. Verificar existencia primero
-    const [rows] = await conn.query('SELECT * FROM pago_seguro WHERE id = ?', [req.params.id])
-    if (rows.length === 0) {
-      await conn.rollback()
-      return res.status(404).json({ message: 'Pago de seguro no encontrado.' })
-    }
-
-    // 2. Actualizar
-    await conn.query(
-      'UPDATE pago_seguro SET estado = ?, fecha_recibido = ?, referencia_bancaria = ? WHERE id = ?',
-      [estado, fecha_recibido || null, referencia_bancaria || null, req.params.id]
-    )
-
-    await conn.query(
-      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
-       VALUES (?, 'pago_seguro', ?, 'cambio_estado', ?)`,
-      [
-        req.usuario.id,
-        req.params.id,
-        `Estado actualizado a "${estado}"${referencia_bancaria ? ` — ref: ${referencia_bancaria}` : ''}`,
-      ]
-    )
-
-    await conn.commit()
-
-    const [updated] = await conn.query('SELECT * FROM pago_seguro WHERE id = ?', [req.params.id])
-    res.json(updated[0])
-  } catch (err) {
-    await conn.rollback()
-    console.error(err)
-    res.status(500).json({ message: 'Error interno del servidor.' })
-  } finally {
-    conn.release()
-  }
-})
-
-// ───────────────────────────────────────────────────────────
-// DELETE /api/pagos/seguro/:id
-// ───────────────────────────────────────────────────────────
-router.delete('/seguro/:id', requireAuth, async (req, res) => {
-  const conn = await pool.getConnection()
-  try {
-    await conn.beginTransaction()
-
-    // 1. Verificar existencia
-    const [rows] = await conn.query('SELECT * FROM pago_seguro WHERE id = ?', [req.params.id])
-    if (rows.length === 0) {
-      await conn.rollback()
-      return res.status(404).json({ message: 'Pago de seguro no encontrado.' })
-    }
-
-    const pago = rows[0]
-
-    // 2. Eliminar
-    await conn.query('DELETE FROM pago_seguro WHERE id = ?', [req.params.id])
-
-    await conn.query(
-      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
-       VALUES (?, 'pago_seguro', ?, 'eliminar', ?)`,
-      [
-        req.usuario.id,
-        req.params.id,
-        `Cobro al seguro eliminado — C$ ${pago.monto} — concepto: ${pago.concepto}`,
-      ]
-    )
-
-    await conn.commit()
-    res.json({ message: 'Pago de seguro eliminado.' })
-  } catch (err) {
-    await conn.rollback()
-    console.error(err)
-    res.status(500).json({ message: 'Error interno del servidor.' })
-  } finally {
-    conn.release()
-  }
-})
-
-// ═══════════════════════════════════════════════════════════
-// CAMBIAR ESTADO A ENTREGADO
-// PATCH /api/pagos/:id_orden/entregar
-// FIX: ahora verifica que la orden no esté ya entregada o cancelada
-// antes de hacer el UPDATE, evitando registros duplicados en auditoría.
-// ═══════════════════════════════════════════════════════════
-router.patch('/:id_orden/entregar', requireAuth, async (req, res) => {
-  const { numero_factura_fisica } = req.body
-  const conn = await pool.getConnection()
-  try {
-    await conn.beginTransaction()
-
-    // Verificar estado actual de la orden
-    const [rows] = await conn.query(
-      'SELECT estado FROM orden WHERE id = ?',
-      [req.params.id_orden]
-    )
-    if (rows.length === 0) {
-      await conn.rollback()
-      return res.status(404).json({ message: 'Orden no encontrada.' })
-    }
-    if (rows[0].estado === 'entregado') {
-      await conn.rollback()
-      return res.status(400).json({ message: 'La orden ya está marcada como entregada.' })
-    }
-    if (rows[0].estado === 'cancelado') {
-      await conn.rollback()
-      return res.status(400).json({ message: 'No se puede entregar una orden cancelada.' })
-    }
-
-    await conn.query(
-      `UPDATE orden SET estado = 'entregado', fecha_entrega_real = CURRENT_DATE,
-       numero_factura_fisica = ? WHERE id = ?`,
-      [numero_factura_fisica?.trim() || null, req.params.id_orden]
-    )
-
-    await conn.query(
-      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
-       VALUES (?, 'orden', ?, 'cambio_estado', 'Orden marcada como entregada desde pagos')`,
-      [req.usuario.id, req.params.id_orden]
-    )
-
-    await conn.commit()
-    const [updated] = await conn.query('SELECT * FROM orden WHERE id = ?', [req.params.id_orden])
-    res.json(updated[0])
-  } catch (err) {
-    await conn.rollback()
-    console.error(err)
-    res.status(500).json({ message: 'Error interno del servidor.' })
-  } finally {
-    conn.release()
-  }
-})
-
 module.exports = router
+
+
+
+

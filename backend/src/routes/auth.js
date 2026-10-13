@@ -1,3 +1,5 @@
+const { randomUUID } = require('node:crypto')
+const requireAuth = require('../middleware/authMiddleware')
 // backend/src/routes/auth.js
 const express = require('express')
 const bcrypt  = require('bcrypt')
@@ -10,7 +12,7 @@ const router = express.Router()
 router.post('/login', async (req, res) => {
   const { email, password } = req.body
 
-  if (!email || !password) {
+  if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
     return res.status(400).json({ message: 'Correo y contraseña son requeridos.' })
   }
 
@@ -33,7 +35,8 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Credenciales incorrectas.' })
     }
 
-    // Generar token — sin expiración (indefinido hasta logout)
+    // Sesión con vencimiento; los tokens antiguos requieren nuevo inicio de sesión.
+    const sessionId = randomUUID()
     const token = jwt.sign(
       {
         id:     usuario.id,
@@ -41,10 +44,10 @@ router.post('/login', async (req, res) => {
         email:  usuario.email,
         rol:    usuario.rol,
       },
-      process.env.JWT_SECRET
-      // Sin expiresIn → el token no caduca por tiempo
+      process.env.JWT_SECRET, { expiresIn: '8h', algorithm: 'HS256', jwtid: sessionId }
     )
 
+    await pool.query('INSERT INTO sesion_usuario (id, id_usuario, vence) VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR))', [sessionId, usuario.id])
     res.json({
       token,
       usuario: {
@@ -60,4 +63,11 @@ router.post('/login', async (req, res) => {
   }
 })
 
+router.post('/logout', requireAuth, async (req, res, next) => {
+  try {
+    await pool.query('DELETE FROM sesion_usuario WHERE id = ?', [req.sessionId])
+    res.json({ message: 'Sesión cerrada.' })
+  } catch (err) { next(err) }
+})
 module.exports = router
+

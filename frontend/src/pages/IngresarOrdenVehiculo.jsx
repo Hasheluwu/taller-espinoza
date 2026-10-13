@@ -1,5 +1,7 @@
+import { apiFetch } from '../lib/api'
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import WizardSteps from '../components/WizardSteps'
 
 function getToken() {
   return localStorage.getItem('token')
@@ -97,8 +99,8 @@ export default function IngresarOrdenVehiculo() {
     if (!cliente) return
     async function cargar() {
       try {
-        const res  = await fetch(
-          `http://localhost:3001/api/vehiculos/por-cliente/${cliente.id}`,
+        const res  = await apiFetch(
+          `/api/vehiculos/por-cliente/${cliente.id}`,
           { headers: { Authorization: `Bearer ${getToken()}` } }
         )
         if (res.ok) setVehiculos(await res.json())
@@ -126,7 +128,7 @@ export default function IngresarOrdenVehiculo() {
     setErrorCrear('')
     setCreando(true)
     try {
-      const res  = await fetch('http://localhost:3001/api/vehiculos', {
+      const res  = await apiFetch('/api/vehiculos', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body:    JSON.stringify({
@@ -178,6 +180,8 @@ export default function IngresarOrdenVehiculo() {
   return (
     <div style={s.page}>
       <div style={s.container}>
+
+        <WizardSteps currentStep={2} />
 
         {/* encabezado */}
         <div style={s.header}>
@@ -377,3 +381,4 @@ const s = {
   detalleValor:        { fontSize: 'var(--text-small)', color: 'var(--foreground)', textAlign: 'right', wordBreak: 'break-all' },
   detalleVacio:        { backgroundColor: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '180px' },
 }
+

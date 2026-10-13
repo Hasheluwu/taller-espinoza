@@ -4,6 +4,7 @@ const pool        = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
 
 const router = express.Router()
+router.use(require('../middleware/validateNumbers'))
 
 const IVA_RATE = 0.15 // IVA Nicaragua 15%
 

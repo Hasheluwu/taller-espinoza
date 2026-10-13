@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useDeferredLoad } from '../hooks/useDeferredLoad'
+import { apiFetch } from '../lib/api'
+import { useState, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import WizardSteps from '../components/WizardSteps'
 
 const getToken = () => localStorage.getItem('token')
-const API = 'http://localhost:3001'
+const API = ''
 
 function BannerContexto({ cliente, vehiculo, presupuesto, onCambiarVehiculo }) {
   return (
@@ -50,7 +53,7 @@ export default function IngresarOrdenFinal() {
     return now.toISOString().slice(0, 16) // datetime-local format
   })
   const [fechaEntregaEst, setFechaEntregaEst]       = useState('')
-  const [tipoPago, setTipoPago]                     = useState(vehiculo?.aseguradora !== 'ninguna' ? vehiculo?.aseguradora : 'particular')
+  const [tipoPago, setTipoPago]                     = useState(['lafise', 'iniser'].includes(vehiculo?.aseguradora) ? vehiculo.aseguradora : 'particular')
   const [numeroTramite, setNumeroTramite]           = useState('')
   const [numeroOrdenSeguro, setNumeroOrdenSeguro]   = useState('')
   const [montoSeguro, setMontoSeguro]               = useState('')
@@ -77,22 +80,14 @@ export default function IngresarOrdenFinal() {
 
   const esSeguro = tipoPago === 'lafise' || tipoPago === 'iniser'
 
-  // Si viene con presupuesto y ese presupuesto ya tiene aseguradora implícita
-  // del vehículo, pre-seleccionamos tipo_pago
-  useEffect(() => {
-    if (vehiculo?.aseguradora && vehiculo.aseguradora !== 'ninguna') {
-      setTipoPago(vehiculo.aseguradora)
-    }
-  }, [])
-
   // Cargar órdenes del mismo vehículo al activar "esta orden deriva de otra"
-  useEffect(() => {
+  const cargarOrigenes = useCallback(() => {
     if (!esDerivada || !vehiculo?.id) {
       setOrdenesOrigen([])
       return
     }
     setCargandoOrdenes(true)
-    fetch(
+    apiFetch(
       `${API}/api/ordenes/por-vehiculo/${vehiculo.id}`,
       { headers: { Authorization: `Bearer ${getToken()}` } }
     )
@@ -100,7 +95,8 @@ export default function IngresarOrdenFinal() {
       .then(data => setOrdenesOrigen(data))
       .catch(() => setOrdenesOrigen([]))
       .finally(() => setCargandoOrdenes(false))
-  }, [esDerivada])
+  }, [esDerivada, vehiculo])
+  useDeferredLoad(cargarOrigenes)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -141,7 +137,7 @@ export default function IngresarOrdenFinal() {
     }
 
     try {
-      const res = await fetch(`${API}/api/ordenes`, {
+      const res = await apiFetch(`${API}/api/ordenes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(payload),
@@ -208,6 +204,8 @@ export default function IngresarOrdenFinal() {
   return (
     <div style={s.page}>
       <div style={s.container}>
+
+        <WizardSteps currentStep={4} />
 
         {/* encabezado */}
         <div style={s.header}>
@@ -595,8 +593,8 @@ const s = {
 
   form:               { display: 'flex', flexDirection: 'column', gap: '1.25rem', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '2rem' },
   field:              { display: 'flex', flexDirection: 'column', gap: '0.35rem' },
-  filaGrid2:          { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' },
-  filaGrid3:          { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' },
+  filaGrid2:          { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '1rem' },
+  filaGrid3:          { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: '1rem' },
   label:              { fontSize: 'var(--text-small)', color: 'var(--neutral-200)', fontWeight: 'var(--weight-medium)' },
   input:              { backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', color: 'var(--foreground)', borderRadius: 'var(--radius-md)', padding: '0.65rem 0.875rem', fontSize: 'var(--text-body)', outline: 'none', width: '100%', transition: 'border-color 0.15s, box-shadow 0.15s', colorScheme: 'dark' },
   inputFocus:         { backgroundColor: 'var(--surface-raised)', border: '1px solid var(--yellow-500)', color: 'var(--foreground)', borderRadius: 'var(--radius-md)', padding: '0.65rem 0.875rem', fontSize: 'var(--text-body)', outline: 'none', width: '100%', boxShadow: 'var(--glow-yellow)', colorScheme: 'dark' },
@@ -642,3 +640,6 @@ const s = {
   exitoMeta:          { fontSize: 'var(--text-small)', color: 'var(--neutral-300)', margin: 0 },
   exitoBtns:          { display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' },
 }
+
+
+

@@ -1,9 +1,11 @@
+import { apiFetch } from '../lib/api'
 // frontend/src/pages/IngresarOrden.jsx
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import WizardSteps from '../components/WizardSteps'
 
 const getToken = () => localStorage.getItem('token')
-const API = 'http://localhost:3001'
+const API = ''
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 function hoy() {
@@ -188,19 +190,20 @@ export default function IngresarOrden() {
 
   // ── debounce: llama a /sugerir cuando cambia texto o filtros ──────────────
   useEffect(() => {
+    const params = new URLSearchParams({ q: busqQ.trim(), modo: busqModo })
+    if (fechaDesde) params.set('fecha_desde', fechaDesde)
+    if (fechaHasta) params.set('fecha_hasta', fechaHasta)
+
+    const timer = setTimeout(async () => {
     if (busqQ.trim().length < 2) {
       setSugerencias([])
       setDropVisible(false)
       return
     }
     setBuscandoQ(true)
-    const params = new URLSearchParams({ q: busqQ.trim(), modo: busqModo })
-    if (fechaDesde) params.set('fecha_desde', fechaDesde)
-    if (fechaHasta) params.set('fecha_hasta', fechaHasta)
 
-    const timer = setTimeout(async () => {
       try {
-        const res  = await fetch(`${API}/api/clientes/sugerir?${params}`, {
+        const res  = await apiFetch(`${API}/api/clientes/sugerir?${params}`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         })
         const data = await res.json()
@@ -242,7 +245,7 @@ export default function IngresarOrden() {
     setClienteConfirmado(null)
     setBuscando(true)
     try {
-      const res  = await fetch(
+      const res  = await apiFetch(
         `${API}/api/clientes/buscar?cedula=${encodeURIComponent(cedula)}`,
         { headers: { Authorization: `Bearer ${getToken()}` } }
       )
@@ -273,7 +276,7 @@ export default function IngresarOrden() {
     setClienteConfirmado(null)
     setCreando(true)
     try {
-      const res  = await fetch(`${API}/api/clientes`, {
+      const res  = await apiFetch(`${API}/api/clientes`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body:    JSON.stringify({
@@ -318,6 +321,8 @@ export default function IngresarOrden() {
   return (
     <div style={s.page}>
       <div style={s.container}>
+
+        <WizardSteps currentStep={1} />
 
         <div style={s.header}>
           <span style={s.eyebrow}>Ruta 1 — Paso 1 de 4</span>
@@ -603,3 +608,4 @@ const s = {
   debugVacio:         { backgroundColor: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '180px' },
   debugVacioTexto:    { fontSize: 'var(--text-small)', color: 'var(--neutral-400)', textAlign: 'center', margin: 0 },
 }
+

@@ -4,6 +4,8 @@ const express = require('express')
 const pool    = require('../db')
 
 const router = express.Router()
+const requireAuth = require('../middleware/authMiddleware')
+router.use(requireAuth, requireAuth.admin)
 
 // POST /api/debug/reset-db
 // Limpia todas las tablas y recarga los datos de prueba del seed.
@@ -16,6 +18,7 @@ router.post('/reset-db', async (req, res) => {
     await conn.query('SET FOREIGN_KEY_CHECKS = 0')
 
     const tablas = [
+      'sesion_usuario',
       'auditoria',
       'liquidacion_detalle',
       'liquidacion_personal',
@@ -54,7 +57,7 @@ router.post('/reset-db', async (req, res) => {
     await conn.query(`
       INSERT INTO usuario (id, nombre, email, password_hash, rol, activo) VALUES
       (1, 'Administrador', 'admin@tallerespinoza.com',
-       '$2b$10$placeholderHashCambiarEnProduccion', 'administrador', TRUE)
+       '$2b$10$SYLkSVbKJob6fWCM3t1qleSVesHl9b8eFiLTjcsxflnMr3f.TslnS', 'administrador', TRUE)
     `)
 
     // ── 3. Proveedores ────────────────────────────────────────────────────────
@@ -479,3 +482,4 @@ router.post('/reset-db', async (req, res) => {
 })
 
 module.exports = router
+

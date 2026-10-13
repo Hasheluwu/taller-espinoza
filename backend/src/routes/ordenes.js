@@ -3,7 +3,11 @@ const express     = require('express')
 const pool        = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
 
+const { calculateSummary, summary } = require('../services/billing')
 const router = express.Router()
+router.use(require('../middleware/validateNumbers'))
+const changeOrderState = require('../handlers/changeOrderState')(pool)
+router.put('/:id/estado', requireAuth, changeOrderState)
 
 // ─── GET /api/ordenes ─────────────────────────────────────────────────────────
 // Lista todas las órdenes con filtros opcionales via query params.
@@ -37,10 +41,12 @@ router.get('/', requireAuth, async (req, res) => {
         o.danos_ocultos,
         o.fecha_ingreso,
         o.fecha_entrega_estimada,
-        o.costo_total,
+        o.costo_total, o.monto_cliente, o.monto_seguro,
+        (SELECT COALESCE(SUM(pc.monto), 0) FROM pago_cliente pc WHERE pc.id_orden = o.id) AS abonado_cliente,
+        (SELECT COALESCE(SUM(ps.monto), 0) FROM pago_seguro ps WHERE ps.id_orden = o.id AND ps.estado = 'recibido') AS abonado_seguro,
         v.matricula,
         c.nombre  AS nombre_cliente,
-        c.cedula
+        c.cedula, c.telefono
       FROM orden o
       JOIN vehiculo v ON v.id = o.id_vehiculo
       JOIN cliente  c ON c.id = v.id_cliente
@@ -100,7 +106,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const [rows] = await pool.query(sql, params)
-    res.json(rows)
+    res.json(rows.map(o => ({ ...o, pagado: calculateSummary(o, [{ monto: o.abonado_cliente }], [{ monto: o.abonado_seguro, estado: 'recibido' }]).pagado })))
   } catch (err) {
     console.error('Error al listar órdenes:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
@@ -203,7 +209,8 @@ router.get('/:id', requireAuth, async (req, res) => {
       [req.params.id]
     )
     if (rows.length === 0) return res.status(404).json({ message: 'Orden no encontrada.' })
-    res.json(rows[0])
+    const balance = await summary(pool, rows[0])
+    res.json({ ...rows[0], pagado: balance.pagado })
   } catch (err) {
     console.error('Error al obtener orden:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
@@ -256,6 +263,12 @@ router.post('/', requireAuth, async (req, res) => {
     })
   }
 
+  if (id_presupuesto) {
+    const [budget] = await pool.query('SELECT id, id_vehiculo, estado FROM presupuesto WHERE id = ?', [id_presupuesto])
+    if (!budget.length || Number(budget[0].id_vehiculo) !== Number(id_vehiculo) || budget[0].estado === 'rechazado') {
+      return res.status(400).json({ message: 'El presupuesto debe pertenecer al vehículo y no estar rechazado.' })
+    }
+  }
   // si tiene id_orden_origen, verificar que esa orden exista
   if (id_orden_origen) {
     try {
@@ -371,3 +384,6 @@ router.post('/', requireAuth, async (req, res) => {
 })
 
 module.exports = router
+
+
+

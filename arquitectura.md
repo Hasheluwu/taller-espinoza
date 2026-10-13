@@ -1,3 +1,8 @@
+> Estado del documento: propuesta de alcance, no inventario de funciones terminadas.
+> La guía de funcionamiento implementado está en README.md. Aprobar un presupuesto
+> cambia su estado; la orden se crea explícitamente en el flujo de recepción y sus
+> cargos se registran en Operaciones. No se crean ni copian cargos automáticamente.
+> Media/R2, liquidaciones, LAFISE y contabilidad permanecen pendientes.
 ---
 
 # INFORME DE ARQUITECTURA DE INTERFAZ — versión 2
@@ -600,4 +605,5 @@ usuario              1 ──── N   auditoria
 usuario              1 ──── N   movimiento_inventario
 
 ---
+
 

@@ -1,9 +1,14 @@
+import {InsuranceCorrection, InsuranceExcess} from '../components/InsuranceCorrection'
+import { useDeferredLoad } from '../hooks/useDeferredLoad'
+import { localDateTime } from '../lib/date'
+import { PaymentBalance, PaymentAllocation } from '../components/PaymentBalance'
+import { apiFetch } from '../lib/api'
 // frontend/src/pages/Pagos.jsx
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 const getToken = () => localStorage.getItem('token')
-const API      = 'http://localhost:3001'
+const API      = ''
 const fmt = n =>
   Number(n || 0).toLocaleString('es-NI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -41,44 +46,11 @@ function Badge({ texto }) {
   )
 }
 
-function ResumenCard({ resumen, esSeguro, orden }) {
-  if (!resumen) return null
-  return (
-    <div style={s.resumenGrid}>
-      <div style={s.resumenBloque}>
-        <span style={s.resumenLabel}>Pagado por cliente</span>
-        <span style={s.resumenMonto}>C$ {fmt(resumen.total_cliente)}</span>
-      </div>
-      {esSeguro && (
-        <>
-          <div style={s.resumenBloque}>
-            <span style={s.resumenLabel}>Cobrado al seguro</span>
-            <span style={{ ...s.resumenMonto, color: 'var(--yellow-400)' }}>C$ {fmt(resumen.seguro_recibido)}</span>
-          </div>
-          <div style={s.resumenBloque}>
-            <span style={s.resumenLabel}>Seguro pendiente</span>
-            <span style={{ ...s.resumenMonto, color: 'var(--danger)' }}>C$ {fmt(resumen.seguro_pendiente)}</span>
-          </div>
-        </>
-      )}
-      <div style={{ ...s.resumenBloque, borderLeft: '2px solid var(--yellow-500)', paddingLeft: '1rem' }}>
-        <span style={s.resumenLabel}>Total recibido</span>
-        <span style={{ ...s.resumenMonto, fontSize: 'var(--text-subtitle)', color: 'var(--yellow-500)' }}>
-          C$ {fmt(resumen.gran_total)}
-        </span>
-      </div>
-      {orden?.costo_total && (
-        <div style={s.resumenBloque}>
-          <span style={s.resumenLabel}>Costo total orden</span>
-          <span style={s.resumenMonto}>C$ {fmt(orden.costo_total)}</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // FIX: generarReciboPDF ahora recibe setError para informar si el navegador bloquea el popup.
 function generarReciboPDF({ pago, orden, setError }) {
+  const escape = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+  pago = Object.fromEntries(Object.entries(pago).map(([key, value]) => [key, typeof value === 'string' ? escape(value) : value]))
+  orden = Object.fromEntries(Object.entries(orden || {}).map(([key, value]) => [key, typeof value === 'string' ? escape(value) : value]))
   const fecha = fmtFechaHora(pago.fecha)
   const monto = fmt(pago.monto)
   const html = `<!DOCTYPE html>
@@ -162,18 +134,20 @@ function ModalConfirmar({ titulo, mensaje, labelConfirmar = 'Eliminar', onConfir
 }
 
 // ─── formulario pago cliente ──────────────────────────────────────────────────
-function FormPagoCliente({ idOrden, orden, onPagoCreado }) {
+function FormPagoCliente({ idOrden, orden, saldo, onPagoCreado }) {
   const [form, setForm]       = useState({
-    monto: '', fecha: new Date().toISOString().slice(0, 16),
+    monto: '', fecha: localDateTime(),
     tipo: 'abono', metodo: 'efectivo', numero_recibo: '',
   })
   const [creando, setCreando] = useState(false)
   const [error, setError]     = useState('')
 
   async function handleSubmit(e) {
-    e.preventDefault(); setError(''); setCreando(true)
+    e.preventDefault(); if (creando) return; setError('');
+    if (!Number.isFinite(Number(form.monto)) || Number(form.monto) <= 0 || Number(form.monto) > saldo) { setError('El monto debe ser positivo y no superar el saldo disponible.'); return }
+    setCreando(true)
     try {
-      const res  = await fetch(`${API}/api/pagos/${idOrden}/cliente`, {
+      const res  = await apiFetch(`${API}/api/pagos/${idOrden}/cliente`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(form),
@@ -183,8 +157,8 @@ function FormPagoCliente({ idOrden, orden, onPagoCreado }) {
       onPagoCreado(data)
       // FIX: pasar setError para que la función pueda reportar popup bloqueado
       generarReciboPDF({ pago: data, orden, setError })
-      setForm({ monto: '', fecha: new Date().toISOString().slice(0, 16), tipo: 'abono', metodo: 'efectivo', numero_recibo: '' })
-    } catch { setError('No se pudo conectar con el servidor.') }
+      setForm({ monto: '', fecha: localDateTime(), tipo: 'abono', metodo: 'efectivo', numero_recibo: '' })
+    } catch (err) { setError(err.message) }
     finally { setCreando(false) }
   }
 
@@ -193,7 +167,7 @@ function FormPagoCliente({ idOrden, orden, onPagoCreado }) {
       <p style={s.formTitulo}>Pago del cliente</p>
       <div style={s.filaGrid2}>
         <Campo label="Monto (C$)" required>
-          <input type="number" min="0.01" step="0.01" value={form.monto}
+          <input type="number" min="0.01" max={saldo} step="0.01" value={form.monto}
             onChange={e => setForm(p => ({ ...p, monto: e.target.value }))}
             placeholder="C$ 0.00" style={s.input} required
             onFocus={e => Object.assign(e.target.style, s.inputFocus)}
@@ -249,7 +223,7 @@ function FormPagoCliente({ idOrden, orden, onPagoCreado }) {
 }
 
 // ─── formulario pago seguro ───────────────────────────────────────────────────
-function FormPagoSeguro({ idOrden, tipoPago, onPagoCreado }) {
+function FormPagoSeguro({ idOrden, tipoPago, saldo, onPagoCreado }) {
   const [form, setForm]       = useState({
     monto: '', fecha_esperada: '', fecha_recibido: '',
     estado: 'pendiente', referencia_bancaria: '', concepto: 'pago_principal',
@@ -258,9 +232,11 @@ function FormPagoSeguro({ idOrden, tipoPago, onPagoCreado }) {
   const [error, setError]     = useState('')
 
   async function handleSubmit(e) {
-    e.preventDefault(); setError(''); setCreando(true)
+    e.preventDefault(); if (creando) return; setError('');
+    if (!Number.isFinite(Number(form.monto)) || Number(form.monto) <= 0 || (Number(form.monto) > saldo && !form.confirmar_excedente)) { setError('El monto debe ser positivo y no superar el saldo disponible.'); return }
+    setCreando(true)
     try {
-      const res  = await fetch(`${API}/api/pagos/${idOrden}/seguro`, {
+      const res  = await apiFetch(`${API}/api/pagos/${idOrden}/seguro`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(form),
@@ -269,7 +245,7 @@ function FormPagoSeguro({ idOrden, tipoPago, onPagoCreado }) {
       if (!res.ok) { setError(data.message || 'Error al registrar pago.'); return }
       onPagoCreado(data)
       setForm({ monto: '', fecha_esperada: '', fecha_recibido: '', estado: 'pendiente', referencia_bancaria: '', concepto: 'pago_principal' })
-    } catch { setError('No se pudo conectar con el servidor.') }
+    } catch (err) { setError(err.message) }
     finally { setCreando(false) }
   }
 
@@ -278,9 +254,10 @@ function FormPagoSeguro({ idOrden, tipoPago, onPagoCreado }) {
       <p style={{ ...s.formTitulo, color: 'var(--blue-300)' }}>
         Cobro al seguro — {tipoPago?.toUpperCase()}
       </p>
+      <InsuranceExcess value={form} onChange={setForm}/>
       <div style={s.filaGrid2}>
         <Campo label="Monto (C$)" required>
-          <input type="number" min="0.01" step="0.01" value={form.monto}
+          <input type="number" min="0.01" max={form.confirmar_excedente ? undefined : saldo} step="0.01" value={form.monto}
             onChange={e => setForm(p => ({ ...p, monto: e.target.value }))}
             placeholder="C$ 0.00" style={s.input} required
             onFocus={e => Object.assign(e.target.style, s.inputFocus)}
@@ -338,7 +315,7 @@ function FormPagoSeguro({ idOrden, tipoPago, onPagoCreado }) {
 }
 
 // ─── lista pagos cliente ──────────────────────────────────────────────────────
-function ListaPagosCliente({ pagos, orden, onEliminar }) {
+function ListaPagosCliente({ pagos, orden, onEliminar, puedeEliminar }) {
   const [confirmandoId, setConfirmandoId] = useState(null)
   // FIX: error inline en vez de alert()
   const [error, setError] = useState('')
@@ -358,7 +335,7 @@ function ListaPagosCliente({ pagos, orden, onEliminar }) {
           onCancelar={() => setConfirmandoId(null)}
         />
       )}
-      {error && <p style={s.err}>{error}</p>}
+      {error && <p role="alert" style={s.err}>{error}</p>}
       <div style={s.listaPagos}>
         {pagos.map(p => (
           <div key={p.id} style={s.filaPago}>
@@ -377,7 +354,7 @@ function ListaPagosCliente({ pagos, orden, onEliminar }) {
               >
                 PDF
               </button>
-              <button onClick={() => setConfirmandoId(p.id)} style={s.btnX} title="Eliminar pago">✕</button>
+              {puedeEliminar && <button onClick={() => setConfirmandoId(p.id)} style={s.btnX} title="Eliminar pago">✕</button>}
             </div>
           </div>
         ))}
@@ -387,28 +364,30 @@ function ListaPagosCliente({ pagos, orden, onEliminar }) {
 }
 
 // ─── lista pagos seguro ───────────────────────────────────────────────────────
-function ListaPagosSeguro({ pagos, onActualizar, onEliminar }) {
+function ListaPagosSeguro({ pagos, onActualizar, onEliminar, puedeEliminar }) {
   const [editandoId, setEditandoId]       = useState(null)
   const [formEdit, setFormEdit]           = useState({ fecha_recibido: '', referencia_bancaria: '' })
   const [guardando, setGuardando]         = useState(false)
+  const [error, setError] = useState('')
   const [confirmandoId, setConfirmandoId] = useState(null)
 
   async function marcarRecibido(pago) {
     setEditandoId(pago.id)
-    setFormEdit({ fecha_recibido: new Date().toISOString().slice(0, 10), referencia_bancaria: pago.referencia_bancaria || '' })
+    setFormEdit({ fecha_recibido: localDateTime().slice(0, 10), referencia_bancaria: pago.referencia_bancaria || '' })
   }
 
   async function confirmarRecibido(id) {
     setGuardando(true)
     try {
-      const res = await fetch(`${API}/api/pagos/seguro/${id}/estado`, {
+      const res = await apiFetch(`${API}/api/pagos/seguro/${id}/estado`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ estado: 'recibido', ...formEdit }),
       })
       const data = await res.json()
-      if (res.ok) { onActualizar(data); setEditandoId(null) }
-    } finally { setGuardando(false) }
+      if (!res.ok) throw new Error(data.message || 'No se pudo confirmar el cobro.')
+      onActualizar(data); setEditandoId(null)
+    } catch (err) { setError(err.message) } finally { setGuardando(false) }
   }
 
   if (pagos.length === 0) return <p style={s.vacio}>Sin cobros registrados al seguro.</p>
@@ -426,6 +405,7 @@ function ListaPagosSeguro({ pagos, onActualizar, onEliminar }) {
           onCancelar={() => setConfirmandoId(null)}
         />
       )}
+      {error && <p role="alert" style={s.err}>{error}</p>}
       <div style={s.listaPagos}>
         {pagos.map(p => (
           <div key={p.id} style={{ ...s.filaPago, flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }}>
@@ -446,11 +426,13 @@ function ListaPagosSeguro({ pagos, onActualizar, onEliminar }) {
                 {p.estado === 'pendiente' && (
                   <button onClick={() => marcarRecibido(p)} style={s.btnRecibido}>Marcar recibido</button>
                 )}
-                <button onClick={() => setConfirmandoId(p.id)} style={s.btnX}>✕</button>
+                {puedeEliminar && <button onClick={() => setConfirmandoId(p.id)} style={s.btnX}>✕</button>}
               </div>
             </div>
+            <InsuranceCorrection payment={p} onSaved={onActualizar}/>
             {editandoId === p.id && (
-              <div style={s.editSeguro}>
+              <div style={{...s.editSeguro, flexWrap: 'wrap'}}>
+                <InsuranceExcess value={formEdit} onChange={setFormEdit}/>
                 <input type="date" value={formEdit.fecha_recibido}
                   onChange={e => setFormEdit(f => ({ ...f, fecha_recibido: e.target.value }))}
                   style={{ ...s.input, colorScheme: 'dark', width: 'auto' }} />
@@ -480,7 +462,7 @@ function ModalEntrega({ idOrden, onCerrar, onEntregada }) {
   async function handleEntregar() {
     setEnviando(true); setError('')
     try {
-      const res = await fetch(`${API}/api/pagos/${idOrden}/entregar`, {
+      const res = await apiFetch(`${API}/api/pagos/${idOrden}/entregar`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ numero_factura_fisica: factura }),
@@ -534,96 +516,38 @@ export default function Pagos() {
     try {
       const headers = { Authorization: `Bearer ${getToken()}` }
       const [rOrden, rResumen] = await Promise.all([
-        fetch(`${API}/api/ordenes/${id}`, { headers }),
-        fetch(`${API}/api/pagos/${id}/resumen`, { headers }),
+        apiFetch(`${API}/api/ordenes/${id}`, { headers }),
+        apiFetch(`${API}/api/pagos/${id}/resumen`, { headers }),
       ])
-      if (rOrden.ok)   setOrden(await rOrden.json())
-      if (rResumen.ok) setResumen(await rResumen.json())
-    } catch { setError('No se pudo conectar con el servidor.') }
+      const dataOrden = await rOrden.json()
+      const dataResumen = await rResumen.json()
+      if (!rOrden.ok || !rResumen.ok) throw new Error(dataOrden.message || dataResumen.message || 'No se pudieron cargar los pagos.')
+      setOrden(dataOrden)
+      setResumen(dataResumen)
+    } catch (err) { setError(err.message) }
     finally { setLoading(false) }
   }, [id])
 
-  useEffect(() => { cargar() }, [cargar])
+  useDeferredLoad(cargar, 0)
 
-  function handlePagoClienteCreado(nuevoPago) {
-    setResumen(prev => ({
-      ...prev,
-      pagos_cliente: [...(prev?.pagos_cliente || []), nuevoPago],
-      total_cliente: parseFloat(prev?.total_cliente || 0) + parseFloat(nuevoPago.monto),
-      gran_total:    parseFloat(prev?.gran_total   || 0) + parseFloat(nuevoPago.monto),
-    }))
-  }
+  function updateBalance(payment) { setResumen(payment.resumen) }
+  const handlePagoClienteCreado = updateBalance
+  const handlePagoSeguroCreado = updateBalance
+  const handleActualizarSeguro = updateBalance
 
-  function handlePagoSeguroCreado(nuevoPago) {
-    const esRecibido = nuevoPago.estado === 'recibido'
-    setResumen(prev => ({
-      ...prev,
-      pagos_seguro:     [...(prev?.pagos_seguro || []), nuevoPago],
-      total_seguro:     parseFloat(prev?.total_seguro     || 0) + parseFloat(nuevoPago.monto),
-      seguro_recibido:  parseFloat(prev?.seguro_recibido  || 0) + (esRecibido ? parseFloat(nuevoPago.monto) : 0),
-      seguro_pendiente: parseFloat(prev?.seguro_pendiente || 0) + (!esRecibido ? parseFloat(nuevoPago.monto) : 0),
-      gran_total:       parseFloat(prev?.gran_total       || 0) + (esRecibido ? parseFloat(nuevoPago.monto) : 0),
-    }))
-  }
-
-  function handleActualizarSeguro(pagoActualizado) {
-    setResumen(prev => {
-      const anterior     = prev.pagos_seguro.find(p => p.id === pagoActualizado.id)
-      const eraPendiente = anterior?.estado === 'pendiente'
-      const monto        = parseFloat(pagoActualizado.monto)
-      return {
-        ...prev,
-        pagos_seguro:     prev.pagos_seguro.map(p => p.id === pagoActualizado.id ? pagoActualizado : p),
-        seguro_recibido:  parseFloat(prev.seguro_recibido)  + (eraPendiente ? monto : 0),
-        seguro_pendiente: parseFloat(prev.seguro_pendiente) - (eraPendiente ? monto : 0),
-        gran_total:       parseFloat(prev.gran_total)       + (eraPendiente ? monto : 0),
-      }
-    })
-  }
-
-  // FIX: recibe setError opcional para mostrar errores del backend inline
-  async function handleEliminarPagoCliente(idPago, setErrorLocal) {
-    const pago = resumen?.pagos_cliente?.find(p => p.id === idPago)
-    const res  = await fetch(`${API}/api/pagos/cliente/${idPago}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-    if (!res.ok) {
+  async function eliminarPago(tipo, idPago, setErrorLocal = setError) {
+    try {
+      const res = await apiFetch(`/api/pagos/${tipo}/${idPago}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getToken()}` } })
       const data = await res.json()
-      if (setErrorLocal) setErrorLocal(data.message || 'No se pudo eliminar el pago.')
-      return
-    }
-    setResumen(prev => ({
-      ...prev,
-      pagos_cliente: prev.pagos_cliente.filter(p => p.id !== idPago),
-      total_cliente: parseFloat(prev.total_cliente) - parseFloat(pago?.monto || 0),
-      gran_total:    parseFloat(prev.gran_total)    - parseFloat(pago?.monto || 0),
-    }))
+      if (!res.ok) throw new Error(data.message || 'No se pudo eliminar el pago.')
+      setResumen(data.resumen)
+    } catch (err) { setErrorLocal(err.message) }
   }
-
-  async function handleEliminarPagoSeguro(idPago) {
-    const pago = resumen?.pagos_seguro?.find(p => p.id === idPago)
-    const res  = await fetch(`${API}/api/pagos/seguro/${idPago}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-    if (!res.ok) {
-      const data = await res.json()
-      setError(data.message || 'No se pudo eliminar el cobro.')
-      return
-    }
-    const eraPendiente = pago?.estado === 'pendiente'
-    const monto        = parseFloat(pago?.monto || 0)
-    setResumen(prev => ({
-      ...prev,
-      pagos_seguro:     prev.pagos_seguro.filter(p => p.id !== idPago),
-      total_seguro:     parseFloat(prev.total_seguro)     - monto,
-      seguro_recibido:  parseFloat(prev.seguro_recibido)  - (!eraPendiente ? monto : 0),
-      seguro_pendiente: parseFloat(prev.seguro_pendiente) - (eraPendiente  ? monto : 0),
-      gran_total:       parseFloat(prev.gran_total)       - (!eraPendiente ? monto : 0),
-    }))
-  }
-
+  const handleEliminarPagoCliente = (idPago, setErrorLocal) => eliminarPago('cliente', idPago, setErrorLocal)
+  const handleEliminarPagoSeguro = idPago => eliminarPago('seguro', idPago)
+  let esAdmin = false
+  try { esAdmin = JSON.parse(atob(getToken().split('.')[1])).rol === 'administrador' } catch { /* API enforces permissions */ }
+  const editable = ['recibido', 'en_proceso'].includes(orden?.estado)
   function handleEntregada() {
     setEntregada(true)
     setModalEntrega(false)
@@ -656,6 +580,7 @@ export default function Pagos() {
           </div>
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <button onClick={() => navigate(`/ordenes/${id}/operaciones`)} style={s.btnSecondary}>Operaciones</button>
+            <button onClick={() => navigate(`/ordenes/${id}/expediente`)} style={s.btnSecondary}>Fotos y costos</button>
             <button onClick={() => navigate('/ordenes')} style={s.btnSecondary}>← Ver órdenes</button>
           </div>
         </div>
@@ -683,22 +608,23 @@ export default function Pagos() {
           </div>
         )}
 
-        <ResumenCard resumen={resumen} esSeguro={esSeguro} orden={orden} />
+        <PaymentBalance resumen={resumen} esSeguro={esSeguro} />
+        {esSeguro && resumen && !resumen.configurado && editable && <PaymentAllocation idOrden={id} resumen={resumen} onSaved={setResumen} />}
 
-        <div style={s.dosColumnas}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <FormPagoCliente idOrden={id} orden={orden} onPagoCreado={handlePagoClienteCreado} />
-            {esSeguro && (
-              <FormPagoSeguro idOrden={id} tipoPago={orden?.tipo_pago} onPagoCreado={handlePagoSeguroCreado} />
+        <div style={{ ...s.dosColumnas, gridTemplateColumns: resumen?.pagado ? '1fr' : 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>
+          {(resumen?.puede_cobrar_cliente || resumen?.puede_cobrar_seguro) && <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {resumen?.puede_cobrar_cliente && <FormPagoCliente idOrden={id} orden={orden} saldo={resumen.saldo_cliente} onPagoCreado={handlePagoClienteCreado} />}
+            {esSeguro && resumen?.puede_cobrar_seguro && (
+              <FormPagoSeguro idOrden={id} saldo={resumen?.disponible_seguro} tipoPago={orden?.tipo_pago} onPagoCreado={handlePagoSeguroCreado} />
             )}
-          </div>
+          </div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             <div style={s.historialBloque}>
               <p style={s.historialTitulo}>Pagos del cliente</p>
               <ListaPagosCliente
                 pagos={resumen?.pagos_cliente || []}
                 orden={orden}
-                onEliminar={handleEliminarPagoCliente}
+                onEliminar={handleEliminarPagoCliente} puedeEliminar={esAdmin && editable && !resumen?.cliente_pagado}
               />
             </div>
             {esSeguro && (
@@ -709,7 +635,7 @@ export default function Pagos() {
                 <ListaPagosSeguro
                   pagos={resumen?.pagos_seguro || []}
                   onActualizar={handleActualizarSeguro}
-                  onEliminar={handleEliminarPagoSeguro}
+                  onEliminar={handleEliminarPagoSeguro} puedeEliminar={esAdmin && editable && !resumen?.seguro_pagado}
                 />
               </div>
             )}
@@ -779,3 +705,10 @@ const s = {
   modalTitulo:       { fontSize: 'var(--text-body-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--foreground)', margin: 0 },
   modalTexto:        { fontSize: 'var(--text-body)', color: 'var(--text-tertiary)', margin: 0, lineHeight: 1.6 },
 }
+
+
+
+
+
+
+

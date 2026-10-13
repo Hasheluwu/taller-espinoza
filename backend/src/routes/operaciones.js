@@ -3,7 +3,9 @@ const express     = require('express')
 const pool        = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
 
+const { lockOrder, fail, money } = require('../services/validation')
 const router = express.Router()
+router.use(require('../middleware/validateNumbers'))
 
 // Estados en los que se permite eliminar/modificar líneas de una orden
 const ESTADOS_EDITABLES = ['recibido', 'en_proceso']
@@ -17,6 +19,8 @@ const ESTADOS_EDITABLES = ['recibido', 'en_proceso']
 // ═══════════════════════════════════════════════════════════
 
 async function recalcularTotalesOrden(conn, id_orden) {
+  const order = await lockOrder(conn, id_orden)
+  if (!ESTADOS_EDITABLES.includes(order.estado)) return { subtotal: order.subtotal, iva: order.iva, costo_total: order.costo_total }
   // servicios — precio con o sin IVA (15%)
   const [servicios] = await conn.query(
     `SELECT precio, aplica_iva FROM orden_servicio WHERE id_orden = ?`,
@@ -53,7 +57,15 @@ async function recalcularTotalesOrden(conn, id_orden) {
     subtotal += parseFloat(r.precio_unitario) * parseInt(r.cantidad_usada)
   }
 
-  const costo_total = subtotal + iva
+  subtotal = Math.round(subtotal * 100) / 100
+  iva = Math.round(iva * 100) / 100
+  const costo_total = Math.round((subtotal + iva) * 100) / 100
+  const [[paid]] = await conn.query(`SELECT
+    (SELECT COALESCE(SUM(monto), 0) FROM pago_cliente WHERE id_orden = ?) +
+    (SELECT COALESCE(SUM(monto), 0) FROM pago_seguro WHERE id_orden = ? AND estado = 'recibido') AS total`, [id_orden, id_orden])
+  // A separately acknowledged overpayment must not force an increase in sales.
+  const appliedPaid = order.costo_total == null ? Number(paid.total) : Math.min(Number(paid.total), Number(order.costo_total))
+  if (Math.round(appliedPaid * 100) > Math.round(costo_total * 100)) fail('El total no puede quedar por debajo de los pagos aplicados a la reparación. Revisa los cargos de la orden.', 409)
 
   await conn.query(
     `UPDATE orden SET subtotal = ?, iva = ?, costo_total = ? WHERE id = ?`,
@@ -69,13 +81,14 @@ router.post('/:id_orden/recalcular', requireAuth, async (req, res) => {
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
     const totales = await recalcularTotalesOrden(conn, req.params.id_orden)
     await conn.commit()
     res.json(totales)
   } catch (err) {
     await conn.rollback()
     console.error('Error al recalcular totales:', err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   } finally {
     conn.release()
   }
@@ -95,7 +108,7 @@ router.get('/:id_orden/servicios', requireAuth, async (req, res) => {
     res.json(rows)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
@@ -107,6 +120,7 @@ router.post('/:id_orden/servicios', requireAuth, async (req, res) => {
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
     const [result] = await conn.query(
       'INSERT INTO orden_servicio (id_orden, descripcion, precio, aplica_iva) VALUES (?, ?, ?, ?)',
       [req.params.id_orden, descripcion.trim(), parseFloat(precio), aplica_iva ? 1 : 0]
@@ -118,7 +132,7 @@ router.post('/:id_orden/servicios', requireAuth, async (req, res) => {
   } catch (err) {
     await conn.rollback()
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   } finally {
     conn.release()
   }
@@ -129,9 +143,10 @@ router.delete('/servicios/:id', requireAuth, async (req, res) => {
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
     // obtener id_orden antes de borrar
     const [rows] = await conn.query(
-      'SELECT id_orden FROM orden_servicio WHERE id = ?',
+      'SELECT id_orden FROM orden_servicio WHERE id = ? FOR UPDATE',
       [req.params.id]
     )
     if (rows.length === 0) {
@@ -142,7 +157,7 @@ router.delete('/servicios/:id', requireAuth, async (req, res) => {
 
     // verificar estado de la orden — solo permitir en recibido o en_proceso
     const [orden] = await conn.query(
-      'SELECT estado FROM orden WHERE id = ?',
+      'SELECT estado FROM orden WHERE id = ? FOR UPDATE',
       [id_orden]
     )
     if (!ESTADOS_EDITABLES.includes(orden[0].estado)) {
@@ -159,7 +174,7 @@ router.delete('/servicios/:id', requireAuth, async (req, res) => {
   } catch (err) {
     await conn.rollback()
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   } finally {
     conn.release()
   }
@@ -178,7 +193,7 @@ router.get('/personal/lista', requireAuth, async (req, res) => {
     res.json(rows)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
@@ -196,7 +211,7 @@ router.post('/personal', requireAuth, async (req, res) => {
     res.status(201).json(nuevo[0])
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
@@ -217,7 +232,7 @@ router.get('/:id_orden/personal', requireAuth, async (req, res) => {
     res.json(rows)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
@@ -226,22 +241,27 @@ router.post('/:id_orden/personal', requireAuth, async (req, res) => {
   const { id_personal, monto_acordado } = req.body
   if (!id_personal || monto_acordado === undefined)
     return res.status(400).json({ message: 'Faltan campos obligatorios.' })
+  const conn = await pool.getConnection()
   try {
-    const [result] = await pool.query(
+    await conn.beginTransaction()
+    await lockOrder(conn, req.params.id_orden, true)
+    const [result] = await conn.query(
       'INSERT INTO orden_personal (id_orden, id_personal, monto_acordado) VALUES (?, ?, ?)',
       [req.params.id_orden, id_personal, parseFloat(monto_acordado)]
     )
-    const [nuevo] = await pool.query(
+    const [nuevo] = await conn.query(
       `SELECT op.*, p.nombre AS nombre_personal, p.rol, p.tipo
        FROM orden_personal op JOIN personal p ON op.id_personal = p.id
        WHERE op.id = ?`,
       [result.insertId]
     )
+    await conn.commit()
     res.status(201).json(nuevo[0])
   } catch (err) {
+    await conn.rollback()
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
-  }
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
+  } finally { conn.release() }
 })
 
 // DELETE /api/operaciones/personal-asignado/:id
@@ -250,10 +270,11 @@ router.delete('/personal-asignado/:id', requireAuth, async (req, res) => {
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
 
     // Obtener id_orden del registro antes de borrar
     const [rows] = await conn.query(
-      'SELECT op.id_orden, o.estado FROM orden_personal op JOIN orden o ON o.id = op.id_orden WHERE op.id = ?',
+      'SELECT op.id_orden, o.estado FROM orden_personal op JOIN orden o ON o.id = op.id_orden WHERE op.id = ? FOR UPDATE',
       [req.params.id]
     )
     if (rows.length === 0) {
@@ -269,13 +290,15 @@ router.delete('/personal-asignado/:id', requireAuth, async (req, res) => {
       })
     }
 
+    const [settled] = await conn.query('SELECT id FROM liquidacion_detalle WHERE id_orden_personal=?', [req.params.id])
+    if (settled.length) fail('El trabajador ya tiene una liquidación para este trabajo. Conserva su registro.', 409)
     await conn.query('DELETE FROM orden_personal WHERE id = ?', [req.params.id])
     await conn.commit()
     res.json({ message: 'Personal removido.' })
   } catch (err) {
     await conn.rollback()
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   } finally {
     conn.release()
   }
@@ -293,7 +316,7 @@ router.get('/inventario/lista', requireAuth, async (req, res) => {
     res.json(rows)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
@@ -305,30 +328,39 @@ router.get('/inventario/lista', requireAuth, async (req, res) => {
 router.get('/:id_orden/materiales', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT om.*, i.nombre AS nombre_material, i.unidad_medida
+      `SELECT om.*, i.nombre AS nombre_material, i.unidad_medida, p.nombre AS responsable, cr.nota
        FROM orden_material om
        JOIN inventario i ON om.id_material = i.id
+       LEFT JOIN consumo_responsable cr ON cr.id_material_orden=om.id
+       LEFT JOIN personal p ON p.id=cr.id_personal
        WHERE om.id_orden = ? ORDER BY om.id ASC`,
       [req.params.id_orden]
     )
     res.json(rows)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
 // POST /api/operaciones/:id_orden/materiales
 router.post('/:id_orden/materiales', requireAuth, async (req, res) => {
-  const { id_material, cantidad_usada } = req.body
+  const { id_material, cantidad_usada, id_personal, nota, monto_acordado } = req.body
   if (!id_material || !cantidad_usada)
     return res.status(400).json({ message: 'Faltan campos obligatorios.' })
 
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
 
     // verificar stock disponible
+    money(cantidad_usada, 'Cantidad', true)
+    if (!id_personal && monto_acordado !== undefined && monto_acordado !== '') fail('Selecciona el trabajador para registrar su monto acordado.')
+    if (id_personal) {
+      const [[person]] = await conn.query('SELECT id FROM personal WHERE id=?', [id_personal])
+      if (!person) fail('Trabajador no encontrado.', 404)
+    }
     const [inv] = await conn.query(
       'SELECT cantidad, precio_unidad FROM inventario WHERE id = ? FOR UPDATE',
       [id_material]
@@ -345,6 +377,11 @@ router.post('/:id_orden/materiales', requireAuth, async (req, res) => {
        VALUES (?, ?, ?, ?, ?)`,
       [req.params.id_orden, id_material, parseFloat(cantidad_usada), precio_unitario, req.usuario.id]
     )
+    if (id_personal) {
+      await conn.query('INSERT INTO consumo_responsable (id_material_orden,id_personal,nota) VALUES (?,?,?)', [result.insertId,id_personal,String(nota || '').slice(0,500)])
+      // Optional labor charge is part of the same transaction as the material.
+      if (monto_acordado !== undefined && monto_acordado !== '') await conn.query('INSERT INTO orden_personal (id_orden,id_personal,monto_acordado) VALUES (?,?,?)', [req.params.id_orden,id_personal,money(monto_acordado,'Monto acordado')])
+    }
 
     // movimiento de salida
     await conn.query(
@@ -383,10 +420,11 @@ router.delete('/materiales/:id', requireAuth, async (req, res) => {
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
 
     // obtener datos del registro antes de borrar
     const [rows] = await conn.query(
-      'SELECT id_orden, id_material, cantidad_usada FROM orden_material WHERE id = ?',
+      'SELECT id_orden, id_material, cantidad_usada FROM orden_material WHERE id = ? FOR UPDATE',
       [req.params.id]
     )
     if (rows.length === 0) {
@@ -397,7 +435,7 @@ router.delete('/materiales/:id', requireAuth, async (req, res) => {
 
     // verificar estado de la orden
     const [orden] = await conn.query(
-      'SELECT estado FROM orden WHERE id = ?',
+      'SELECT estado FROM orden WHERE id = ? FOR UPDATE',
       [id_orden]
     )
     if (!ESTADOS_EDITABLES.includes(orden[0].estado)) {
@@ -410,14 +448,12 @@ router.delete('/materiales/:id', requireAuth, async (req, res) => {
     // borrar el registro de orden_material
     await conn.query('DELETE FROM orden_material WHERE id = ?', [req.params.id])
 
-    // borrar el movimiento de salida correspondiente
+    // Preserve the original outgoing movement and record an explicit reversal.
     await conn.query(
-      `DELETE FROM movimiento_inventario
-       WHERE id_orden = ? AND id_inventario = ? AND tipo = 'salida_orden'
-       ORDER BY id DESC LIMIT 1`,
-      [id_orden, id_material]
+      `INSERT INTO movimiento_inventario (id_inventario, tipo, cantidad, id_usuario, id_orden, nota)
+       VALUES (?, 'ajuste_manual', ?, ?, ?, ?)`,
+      [id_material, Number(cantidad_usada), req.usuario.id, id_orden, `Devolución por eliminación de material #${req.params.id}`]
     )
-
     // devolver la cantidad al inventario
     await conn.query(
       'UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?',
@@ -430,7 +466,7 @@ router.delete('/materiales/:id', requireAuth, async (req, res) => {
   } catch (err) {
     await conn.rollback()
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   } finally {
     conn.release()
   }
@@ -448,7 +484,7 @@ router.get('/repuestos/lista', requireAuth, async (req, res) => {
     res.json(rows)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
@@ -469,19 +505,21 @@ router.get('/:id_orden/repuestos', requireAuth, async (req, res) => {
     res.json(rows)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
 // POST /api/operaciones/:id_orden/repuestos
 router.post('/:id_orden/repuestos', requireAuth, async (req, res) => {
   const { id_repuesto, cantidad_usada } = req.body
+  if (!Number.isSafeInteger(Number(cantidad_usada)) || Number(cantidad_usada) <= 0) return res.status(400).json({ message: 'La cantidad de repuestos debe ser un entero positivo.' })
   if (!id_repuesto || !cantidad_usada)
     return res.status(400).json({ message: 'Faltan campos obligatorios.' })
 
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
 
     const [rep] = await conn.query(
       'SELECT cantidad, precio FROM repuesto_taller WHERE id = ? FOR UPDATE',
@@ -537,7 +575,7 @@ router.get('/:id_orden/danos', requireAuth, async (req, res) => {
     res.json(rows)
   } catch (err) {
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
 })
 
@@ -550,6 +588,7 @@ router.post('/:id_orden/danos', requireAuth, async (req, res) => {
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
 
     const [result] = await conn.query(
       `INSERT INTO orden_dano_oculto
@@ -581,10 +620,14 @@ router.post('/:id_orden/danos', requireAuth, async (req, res) => {
   } catch (err) {
     await conn.rollback()
     console.error(err)
-    res.status(500).json({ message: 'Error interno.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   } finally {
     conn.release()
   }
 })
 
 module.exports = router
+
+
+
+

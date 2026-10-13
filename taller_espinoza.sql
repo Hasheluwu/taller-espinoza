@@ -405,7 +405,7 @@ INSERT INTO usuario (nombre, email, password_hash, rol, activo)
 VALUES (
   'Administrador',
   'admin@tallerespinoza.com',
-  '$2b$10$placeholderHashCambiarEnProduccion',
+  '$2b$10$SYLkSVbKJob6fWCM3t1qleSVesHl9b8eFiLTjcsxflnMr3f.TslnS',
   'administrador',
   TRUE
 );

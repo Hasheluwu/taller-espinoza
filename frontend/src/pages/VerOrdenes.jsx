@@ -1,145 +1,176 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useDeferredLoad } from '../hooks/useDeferredLoad'
+import { apiFetch } from '../lib/api'
+import { useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 const getToken = () => localStorage.getItem('token')
-const API = 'http://localhost:3001'
+const API = ''
 
-const ESTADO_STYLES = {
-  recibido:   { bg: 'rgba(107,138,170,0.15)', color: '#6b8aaa', border: 'rgba(107,138,170,0.3)' },
-  en_proceso: { bg: 'rgba(255,195,0,0.12)',   color: '#FFC300', border: 'rgba(255,195,0,0.3)'   },
-  listo:      { bg: 'rgba(34,197,94,0.12)',   color: '#22c55e', border: 'rgba(34,197,94,0.3)'   },
-  entregado:  { bg: 'rgba(51,133,214,0.12)',  color: '#3385d6', border: 'rgba(51,133,214,0.3)'  },
-  cancelado:  { bg: 'rgba(229,72,77,0.12)',   color: '#e5484d', border: 'rgba(229,72,77,0.3)'   },
-}
+const KANBAN_COLUMNS = [
+  { key: 'recibido',   title: '📥 Recibidos',     color: '#ffac7c', badgeClass: 'badge-cyber-cyan' },
+  { key: 'en_proceso', title: '🛠️ En Proceso',     color: '#fb923c', badgeClass: 'badge-cyber-orange' },
+  { key: 'listo',      title: '✅ Listo Entrega', color: '#34d399', badgeClass: 'badge-cyber-emerald' },
+  { key: 'entregado',  title: '🚀 Entregados',    color: '#a78bfa', badgeClass: 'badge-cyber-violet' },
+]
 
-function BadgeEstado({ estado }) {
-  const st = ESTADO_STYLES[estado] || ESTADO_STYLES.recibido
+// ─── MODAL DETALLE DE VEHÍCULO (INTERACTIVO) ──────────────────────────────────
+function ModalDetalleOrden({ orden, onClose, onOperaciones, onPago, onCambiarEstado, guardando, errorEstado }) {
+  if (!orden) return null
+
   return (
-    <span style={{ backgroundColor: st.bg, color: st.color, border: `1px solid ${st.border}`, borderRadius: 'var(--radius-full)', padding: '0.2rem 0.65rem', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)' }}>
-      {estado.replace('_', ' ')}
-    </span>
-  )
-}
-
-function BadgeGarantia({ es }) {
-  return (
-    <span style={{ backgroundColor: es ? 'rgba(82,183,136,0.12)' : 'rgba(107,138,170,0.1)', color: es ? '#52B788' : '#6b8aaa', border: `1px solid ${es ? 'rgba(82,183,136,0.3)' : 'rgba(107,138,170,0.2)'}`, borderRadius: 'var(--radius-full)', padding: '0.15rem 0.5rem', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)' }}>
-      {es ? 'Garantía' : 'Normal'}
-    </span>
-  )
-}
-
-function TarjetaRow({ o, onPago, onOperaciones }) {
-  return (
-    <div style={s.cardRow}>
-      <div style={s.cardRowMain}>
-        <div style={s.cardRowIzq}>
-          <span style={s.matricula}>{o.matricula}</span>
-          <span style={s.clienteNombre}>{o.nombre_cliente}</span>
-          <span style={s.cedula}>{o.cedula}</span>
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="card-cyber animate-modal-pop"
+        onClick={e => e.stopPropagation()}
+        style={{ width: '100%', maxWidth: '520px', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <span style={{
+              backgroundColor: 'rgba(255, 149, 89, 0.2)',
+              color: '#ffac7c',
+              fontWeight: '900',
+              fontSize: '1.1rem',
+              padding: '0.35rem 0.85rem',
+              borderRadius: '8px',
+              border: '1px solid rgba(255, 149, 89, 0.4)'
+            }}>
+              {orden.matricula}
+            </span>
+            <span style={{ fontSize: '0.85rem', color: '#9ca3af', textTransform: 'capitalize' }}>
+              Orden #{orden.id}
+            </span>
+          </div>
+          <button disabled={guardando} onClick={onClose} style={{ backgroundColor: 'transparent', color: '#9ca3af', fontSize: '1.25rem' }}>
+            ✕
+          </button>
         </div>
-        <div style={s.cardRowMid}>
-          <BadgeEstado estado={o.estado} />
-          <BadgeGarantia es={!!o.es_garantia} />
-          <span style={s.tipoBadge}>{o.tipo}</span>
-          <span style={s.pagoBadge}>{o.tipo_pago}</span>
-        </div>
-        <div style={s.cardRowDer}>
-          <span style={s.fechaLabel}>Ingreso</span>
-          <span style={s.fechaVal}>{new Date(o.fecha_ingreso).toLocaleDateString('es-NI')}</span>
-          {o.fecha_entrega_estimada && (
-            <>
-              <span style={s.fechaLabel}>Entrega est.</span>
-              <span style={s.fechaVal}>{new Date(o.fecha_entrega_estimada).toLocaleDateString('es-NI')}</span>
-            </>
-          )}
-        </div>
-      </div>
-      <div style={s.cardBtns}>
-        <button style={s.btnDetalle} disabled title="Disponible próximamente">Ver detalle</button>
-        <button style={s.btnOperaciones} onClick={() => onOperaciones(o.id)}>Operaciones</button>
-        <button style={s.btnPago} onClick={() => onPago(o.id)}>Ingresar pago</button>
-        {o.tipo_pago === 'lafise' && (
-          <button style={s.btnLinker} disabled title="Disponible próximamente">Linker LAFISE</button>
-        )}
-      </div>
-    </div>
-  )
-}
 
-function TarjetaGrid({ o, onPago, onOperaciones }) {
-  return (
-    <div style={s.cardGrid}>
-      <div style={s.gridHeader}>
-        <span style={s.matricula}>{o.matricula}</span>
-        <BadgeEstado estado={o.estado} />
-      </div>
-      <span style={s.clienteNombre}>{o.nombre_cliente}</span>
-      <span style={s.cedula}>{o.cedula}</span>
-      <div style={s.gridBadges}>
-        <BadgeGarantia es={!!o.es_garantia} />
-        <span style={s.tipoBadge}>{o.tipo}</span>
-        <span style={s.pagoBadge}>{o.tipo_pago}</span>
-      </div>
-      <span style={s.fechaLabel}>
-        Ingreso: <span style={s.fechaVal}>{new Date(o.fecha_ingreso).toLocaleDateString('es-NI')}</span>
-      </span>
-      <div style={s.cardBtns}>
-        <button style={s.btnDetalle} disabled>Ver detalle</button>
-        <button style={s.btnOperaciones} onClick={() => onOperaciones(o.id)}>Operaciones</button>
-        <button style={s.btnPago} onClick={() => onPago(o.id)}>Pago</button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+          <h2 style={{ fontSize: '1.35rem', fontWeight: '800', color: '#f9fafb', margin: 0 }}>
+            {orden.nombre_cliente}
+          </h2>
+          <span style={{ fontSize: '0.85rem', color: '#ff9559' }}>
+            Cédula: {orden.cedula || 'N/D'} · Teléfono: {orden.telefono || 'No registrado'}
+          </span>
+        </div>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: '1rem',
+          backgroundColor: 'rgba(17, 24, 39, 0.8)',
+          padding: '1rem',
+          borderRadius: '10px',
+          border: '1px solid rgba(255, 255, 255, 0.08)'
+        }}>
+          <div>
+            <span style={{ fontSize: '0.75rem', color: '#979faa', display: 'block' }}>Tipo de Trabajo</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: '700', color: '#f9fafb', textTransform: 'capitalize' }}>
+              {orden.tipo}
+            </span>
+          </div>
+          <div>
+            <span style={{ fontSize: '0.75rem', color: '#979faa', display: 'block' }}>Tipo de Pago</span>
+            <span style={{ fontSize: '0.9rem', fontWeight: '700', color: '#fb923c', textTransform: 'uppercase' }}>
+              {orden.tipo_pago}
+            </span>
+          </div>
+          <div>
+            <span style={{ fontSize: '0.75rem', color: '#979faa', display: 'block' }}>Fecha de Ingreso</span>
+            <span style={{ fontSize: '0.85rem', color: '#9ca3af' }}>
+              {new Date(orden.fecha_ingreso).toLocaleDateString('es-NI')}
+            </span>
+          </div>
+          <div>
+            <span style={{ fontSize: '0.75rem', color: '#979faa', display: 'block' }}>Estado Actual</span>
+            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#34d399', textTransform: 'capitalize' }}>
+              {orden.estado.replace('_', ' ')}
+            </span>
+          </div>
+        </div>
+
+        {errorEstado && <p role="alert" className="login-error">{errorEstado}</p>}
+        {guardando && <p role="status">Guardando cambio de estado…</p>}
+        {/* Mover estado rápido */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#9ca3af', textTransform: 'uppercase' }}>
+            Acción Rápida de Estado
+          </span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
+            {!['en_proceso', 'entregado', 'cancelado'].includes(orden.estado) && (
+              <button
+                disabled={guardando} onClick={() => onCambiarEstado(orden.id, 'en_proceso')}
+                className="btn-cyber-cyan"
+                style={{ fontSize: '0.8rem', padding: '0.5rem' }}
+              >
+                ▶ Iniciar Trabajo
+              </button>
+            )}
+            {!['listo', 'entregado', 'cancelado'].includes(orden.estado) && (
+              <button
+                disabled={guardando} onClick={() => onCambiarEstado(orden.id, 'listo')}
+                style={{ backgroundColor: '#10b981', color: '#101215', fontWeight: '800', fontSize: '0.8rem', padding: '0.5rem' }}
+              >
+                ✔ Marcar Listo
+              </button>
+            )}
+            {!['entregado', 'cancelado'].includes(orden.estado) && (
+              <button
+                disabled={guardando} onClick={() => onCambiarEstado(orden.id, 'entregado')}
+                style={{ backgroundColor: '#8b5cf6', color: '#ffffff', fontWeight: '800', fontSize: '0.8rem', padding: '0.5rem' }}
+              >
+                📦 Marcar Entregado
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+          <button
+            disabled={guardando} onClick={() => { onClose(); onOperaciones(orden.id) }}
+            className="btn-cyber-outline"
+            style={{ flex: 1 }}
+          >
+            ⚙️ Avances & Operaciones
+          </button>
+          <button
+            disabled={guardando} onClick={() => { onClose(); onPago(orden.id) }}
+            className="btn-cyber-orange"
+            style={{ flex: 1 }}
+          >
+            {orden.pagado ? '✓ Pagado · Ver recibos' : 'Registrar pago'}
+          </button>
+        </div>
       </div>
     </div>
   )
 }
 
 export default function VerOrdenes() {
-  const navigate    = useNavigate()
-  const filtrosRef  = useRef(null)
+  const navigate = useNavigate()
 
   const [ordenes, setOrdenes]   = useState([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
-  const [modo, setModo]         = useState('row')
-  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)
-
-  const [q, setQ]                           = useState('')
-  const [filtroEstado, setFiltroEstado]     = useState('')
-  const [filtroTipo, setFiltroTipo]         = useState('')
-  const [filtroPago, setFiltroPago]         = useState('')
-  const [filtroGarantia, setFiltroGarantia] = useState('')
-  const [filtroExterno, setFiltroExterno]   = useState('')
-  const [filtroInterno, setFiltroInterno]   = useState('')
-  const [filtroDanos, setFiltroDanos]       = useState('')
-  const [fechaDesde, setFechaDesde]         = useState('')
-  const [fechaHasta, setFechaHasta]         = useState('')
-  const [ordenCosto, setOrdenCosto]         = useState('')
-  const [soloActivas, setSoloActivas]       = useState(true)
-
-  // cuenta cuántos filtros están activos (excluye soloActivas que siempre está)
-  const filtrosActivos = [filtroEstado, filtroTipo, filtroPago, filtroGarantia,
-    filtroExterno, filtroInterno, filtroDanos, fechaDesde, fechaHasta, ordenCosto
-  ].filter(Boolean).length
+  const [q, setQ]               = useState('')
+  const [filtroTipo, setFiltroTipo] = useState('')
+  const [vistaModo, setVistaModo]   = useState('kanban')
+  const [ordenModal, setOrdenModal] = useState(null)
+  const [guardando, setGuardando] = useState(false)
+  const [errorEstado, setErrorEstado] = useState('')
+  const [mensaje, setMensaje] = useState('')
+  const estadoEnCurso = useRef(false)
 
   const cargarOrdenes = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
       const params = new URLSearchParams()
-      if (q)             params.set('q', q)
-      if (filtroEstado)  params.set('estado', filtroEstado)
-      if (filtroTipo)    params.set('tipo', filtroTipo)
-      if (filtroPago)    params.set('tipo_pago', filtroPago)
-      if (filtroGarantia !== '') params.set('es_garantia', filtroGarantia)
-      if (filtroExterno !== '')  params.set('obra_externa', filtroExterno)
-      if (filtroInterno !== '')  params.set('obra_interna', filtroInterno)
-      if (filtroDanos !== '')    params.set('danos_ocultos', filtroDanos)
-      if (fechaDesde)    params.set('fecha_desde', fechaDesde)
-      if (fechaHasta)    params.set('fecha_hasta', fechaHasta)
-      if (ordenCosto)    params.set('orden_costo', ordenCosto)
-      params.set('solo_activas', soloActivas ? 'true' : 'false')
+      if (q) params.set('q', q)
+      if (filtroTipo) params.set('tipo', filtroTipo)
 
-      const res  = await fetch(`${API}/api/ordenes?${params}`, {
+      const res = await apiFetch(`${API}/api/ordenes?${params}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       })
       const data = await res.json()
@@ -150,279 +181,243 @@ export default function VerOrdenes() {
     } finally {
       setLoading(false)
     }
-  }, [q, filtroEstado, filtroTipo, filtroPago, filtroGarantia, filtroExterno,
-      filtroInterno, filtroDanos, fechaDesde, fechaHasta, ordenCosto, soloActivas])
+  }, [q, filtroTipo])
 
-  useEffect(() => { cargarOrdenes() }, [cargarOrdenes])
+  useDeferredLoad(cargarOrdenes, 200)
 
-  // cerrar panel si se hace click fuera
-  useEffect(() => {
-    function handleClick(e) {
-      if (filtrosRef.current && !filtrosRef.current.contains(e.target)) {
-        setFiltrosAbiertos(false)
-      }
+  async function cambiarEstado(id, nuevoEstado) {
+    if (estadoEnCurso.current) return
+    estadoEnCurso.current = true
+    setGuardando(true)
+    setErrorEstado('')
+    setMensaje('')
+    try {
+      const res = await apiFetch(`/api/ordenes/${id}/estado`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ estado: nuevoEstado }),
+      })
+      const updated = await res.json()
+      if (!res.ok) throw new Error(updated.message || 'No se pudo guardar el estado.')
+      setOrdenes(prev => prev.map(orden => orden.id === id ? { ...orden, ...updated } : orden))
+      setOrdenModal(null)
+      setMensaje(`Orden #${id}: ${nuevoEstado.replaceAll('_', ' ')}. Cambio guardado correctamente.`)
+    } catch (err) {
+      setErrorEstado(err.message)
+    } finally {
+      estadoEnCurso.current = false
+      setGuardando(false)
     }
-    if (filtrosAbiertos) document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [filtrosAbiertos])
-
-  function limpiarFiltros() {
-    setQ(''); setFiltroEstado(''); setFiltroTipo(''); setFiltroPago('')
-    setFiltroGarantia(''); setFiltroExterno(''); setFiltroInterno('')
-    setFiltroDanos(''); setFechaDesde(''); setFechaHasta(''); setOrdenCosto('')
-    setSoloActivas(true)
   }
-
   return (
-    <div style={s.page}>
-      <div style={s.container}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }} className="animate-fade-in-up">
 
-        {/* encabezado */}
-        <div style={s.header}>
-          <div>
-            <span style={s.eyebrow}>Ruta 2</span>
-            <h1 style={s.titulo}>Ver <span style={s.accent}>Órdenes</span></h1>
-          </div>
-          <button onClick={() => navigate('/ordenes/nueva')} style={s.btnNueva}>+ Nueva orden</button>
+      {/* MODAL INTERACTIVO */}
+      {ordenModal && (
+        <ModalDetalleOrden
+          orden={ordenModal} guardando={guardando} errorEstado={errorEstado}
+          onClose={() => { if (!guardando) { setOrdenModal(null); setErrorEstado('') } }}
+          onOperaciones={id => navigate(`/ordenes/${id}/operaciones`)}
+          onPago={id => navigate(`/ordenes/${id}/pago`)}
+          onCambiarEstado={cambiarEstado}
+        />
+      )}
+
+      {mensaje && <p role="status" className="badge-cyber badge-cyber-emerald">{mensaje}</p>}
+      {loading && <p role="status">Cargando órdenes…</p>}
+      {/* HEADER */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <span style={{ fontSize: '0.75rem', fontWeight: '800', color: '#ff9559', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            Tablero de Control Visual
+          </span>
+          <h1 style={{ fontSize: '1.85rem', fontWeight: '800', color: '#f9fafb', margin: 0, lineHeight: 1.1 }}>
+            Gestión Operativa de Órdenes
+          </h1>
         </div>
 
-        {/* ── barra principal: búsqueda + filtros + toggle ───────────────── */}
-        <div style={s.barraTop}>
-
-          {/* input búsqueda — más corto */}
-          <input
-            type="text" value={q} onChange={e => setQ(e.target.value)}
-            placeholder="Buscar por cédula, nombre o matrícula..."
-            style={s.inputBusqueda}
-          />
-
-          {/* botón filtros con contador de activos */}
-          <div ref={filtrosRef} style={{ position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          <div style={{ display: 'flex', backgroundColor: '#191c21', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '8px', padding: '0.25rem' }}>
             <button
-              onClick={() => setFiltrosAbiertos(v => !v)}
+              onClick={() => setVistaModo('kanban')}
               style={{
-                ...s.btnFiltros,
-                ...(filtrosAbiertos ? s.btnFiltrosActivo : {}),
+                backgroundColor: vistaModo === 'kanban' ? '#ff9559' : 'transparent',
+                color: vistaModo === 'kanban' ? '#101215' : '#9ca3af',
+                fontWeight: vistaModo === 'kanban' ? '800' : '600',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '6px',
+                fontSize: '0.825rem'
               }}
             >
-              Filtros
-              {filtrosActivos > 0 && (
-                <span style={s.filtrosBadge}>{filtrosActivos}</span>
-              )}
-              <span style={{ fontSize: '0.7rem', marginLeft: '0.25rem' }}>{filtrosAbiertos ? '▲' : '▼'}</span>
+              📌 Tablero Kanban (Visual)
             </button>
+            <button
+              onClick={() => setVistaModo('tabla')}
+              style={{
+                backgroundColor: vistaModo === 'tabla' ? '#ff9559' : 'transparent',
+                color: vistaModo === 'tabla' ? '#101215' : '#9ca3af',
+                fontWeight: vistaModo === 'tabla' ? '800' : '600',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '6px',
+                fontSize: '0.825rem'
+              }}
+            >
+              📋 Lista Detallada
+            </button>
+          </div>
 
-            {/* panel desplegable */}
-            {filtrosAbiertos && (
-              <div style={s.filtrosPanel}>
-                <div style={s.filtrosPanelInner}>
+          <button onClick={() => navigate('/ordenes/nueva')} className="btn-cyber-orange">
+            ➕ Nueva Orden
+          </button>
+        </div>
+      </div>
 
-                  {/* fila 1 */}
-                  <div style={s.filtroGrupo}>
-                    <span style={s.filtroLabel}>Estado</span>
-                    <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={s.select}>
-                      <option value="">Todos</option>
-                      <option value="recibido">Recibido</option>
-                      <option value="en_proceso">En proceso</option>
-                      <option value="listo">Listo</option>
-                      <option value="entregado">Entregado</option>
-                      <option value="cancelado">Cancelado</option>
-                    </select>
-                  </div>
+      {/* FILTROS DE BÚSQUEDA */}
+      <div className="card-cyber" style={{ padding: '1rem 1.25rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="🔍 Filtrar vehículo por matrícula, cliente o cédula..."
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          style={{ flex: 1, minWidth: '260px' }}
+        />
 
-                  <div style={s.filtroGrupo}>
-                    <span style={s.filtroLabel}>Tipo</span>
-                    <select value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)} style={s.select}>
-                      <option value="">Todos</option>
-                      <option value="pintura">Pintura</option>
-                      <option value="mecanica">Mecánica</option>
-                      <option value="mantenimiento">Mantenimiento</option>
-                    </select>
-                  </div>
+        <select
+          value={filtroTipo}
+          onChange={e => setFiltroTipo(e.target.value)}
+          style={{ width: '220px' }}
+        >
+          <option value="">Todos los Tipos de Trabajo</option>
+          <option value="pintura">Pintura</option>
+          <option value="mecanica">Mecánica</option>
+          <option value="mantenimiento">Mantenimiento</option>
+        </select>
+      </div>
 
-                  <div style={s.filtroGrupo}>
-                    <span style={s.filtroLabel}>Pago</span>
-                    <select value={filtroPago} onChange={e => setFiltroPago(e.target.value)} style={s.select}>
-                      <option value="">Todos</option>
-                      <option value="particular">Particular</option>
-                      <option value="lafise">LAFISE</option>
-                      <option value="iniser">INISER</option>
-                    </select>
-                  </div>
+      {error && (
+        <div style={{ padding: '1rem', backgroundColor: 'rgba(244, 63, 94, 0.12)', border: '1px solid rgba(244, 63, 94, 0.3)', color: '#fb7185', borderRadius: '8px' }}>
+          {error}
+        </div>
+      )}
 
-                  <div style={s.filtroGrupo}>
-                    <span style={s.filtroLabel}>Garantía</span>
-                    <select value={filtroGarantia} onChange={e => setFiltroGarantia(e.target.value)} style={s.select}>
-                      <option value="">Todas</option>
-                      <option value="true">Sí</option>
-                      <option value="false">No</option>
-                    </select>
-                  </div>
-
-                  <div style={s.filtroGrupo}>
-                    <span style={s.filtroLabel}>Obra externa</span>
-                    <select value={filtroExterno} onChange={e => setFiltroExterno(e.target.value)} style={s.select}>
-                      <option value="">Todas</option>
-                      <option value="true">Sí</option>
-                      <option value="false">No</option>
-                    </select>
-                  </div>
-
-                  <div style={s.filtroGrupo}>
-                    <span style={s.filtroLabel}>Obra interna</span>
-                    <select value={filtroInterno} onChange={e => setFiltroInterno(e.target.value)} style={s.select}>
-                      <option value="">Todas</option>
-                      <option value="true">Sí</option>
-                      <option value="false">No</option>
-                    </select>
-                  </div>
-
-                  <div style={s.filtroGrupo}>
-                    <span style={s.filtroLabel}>Daños ocultos</span>
-                    <select value={filtroDanos} onChange={e => setFiltroDanos(e.target.value)} style={s.select}>
-                      <option value="">Todos</option>
-                      <option value="true">Con daños</option>
-                      <option value="false">Sin daños</option>
-                    </select>
-                  </div>
-
-                  <div style={s.filtroGrupo}>
-                    <span style={s.filtroLabel}>Orden por costo</span>
-                    <select value={ordenCosto} onChange={e => setOrdenCosto(e.target.value)} style={s.select}>
-                      <option value="">Sin ordenar</option>
-                      <option value="desc">Mayor a menor</option>
-                      <option value="asc">Menor a mayor</option>
-                    </select>
-                  </div>
-
-                  {/* rango fechas */}
-                  <div style={{ ...s.filtroGrupo, gridColumn: 'span 2' }}>
-                    <span style={s.filtroLabel}>Rango de ingreso</span>
-                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                      <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} style={s.select} />
-                      <span style={{ color: 'var(--neutral-400)', fontSize: 'var(--text-small)' }}>→</span>
-                      <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} style={s.select} />
-                    </div>
-                  </div>
-
-                  {/* solo activas */}
-                  <div style={{ ...s.filtroGrupo, justifyContent: 'flex-end' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={soloActivas} onChange={e => setSoloActivas(e.target.checked)} style={{ accentColor: 'var(--yellow-500)', width: '15px', height: '15px' }} />
-                      <span style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-200)' }}>Solo activas</span>
-                    </label>
-                  </div>
-
+      {/* TABLERO KANBAN */}
+      {vistaModo === 'kanban' && (
+        <div className="kanban-container">
+          {KANBAN_COLUMNS.map(col => {
+            const ordenesCol = ordenes.filter(o => o.estado === col.key)
+            return (
+              <div key={col.key} className="kanban-column" style={{ borderTop: `4px solid ${col.color}` }}>
+                <div className="kanban-column-header">
+                  <span style={{ fontSize: '0.9rem', fontWeight: '800', color: '#f9fafb' }}>
+                    {col.title}
+                  </span>
+                  <span className={`badge-cyber ${col.badgeClass}`}>
+                    {ordenesCol.length}
+                  </span>
                 </div>
 
-                {/* pie del panel */}
-                <div style={s.filtrosPie}>
-                  <button onClick={limpiarFiltros} style={s.btnLimpiar}>Limpiar filtros</button>
-                  <button onClick={() => setFiltrosAbiertos(false)} style={s.btnAplicar}>Aplicar</button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  {ordenesCol.map(orden => (
+                    <div
+                      key={orden.id}
+                      onClick={() => setOrdenModal(orden)}
+                      className="card-cyber animate-fade-in-up"
+                      style={{
+                        padding: '1rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.65rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{
+                          backgroundColor: 'rgba(255, 149, 89, 0.2)',
+                          color: '#ffac7c',
+                          fontWeight: '900',
+                          fontSize: '0.9rem',
+                          padding: '0.25rem 0.65rem',
+                          borderRadius: '6px',
+                          border: '1px solid rgba(255, 149, 89, 0.4)'
+                        }}>
+                          {orden.matricula}
+                        </span>
+
+                        <span style={{ fontSize: '0.7rem', fontWeight: '700', color: '#fb923c', textTransform: 'uppercase' }}>
+                          {orden.tipo_pago}
+                        </span>
+                      </div>
+
+                      <div>
+                        <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: '#f9fafb', margin: 0 }}>
+                          {orden.nombre_cliente}
+                        </h4>
+                        <span style={{ fontSize: '0.78rem', color: '#9ca3af', textTransform: 'capitalize' }}>
+                          Trabajo: {orden.tipo}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.75rem', color: '#979faa', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.5rem' }}>
+                        <span>Ingreso: {new Date(orden.fecha_ingreso).toLocaleDateString('es-NI')}</span>
+                        <span style={{ color: '#ff9559', fontWeight: '700' }}>👁 Ver Detalle</span>
+                      </div>
+                    </div>
+                  ))}
+
+                  {ordenesCol.length === 0 && (
+                    <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#979faa', fontSize: '0.8rem', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '8px' }}>
+                      Sin vehículos
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* toggle layout */}
-          <div style={s.toggleLayout}>
-            <button onClick={() => setModo('row')} style={modo === 'row' ? s.toggleActivo : s.toggleInactivo} title="Vista lista">☰</button>
-            <button onClick={() => setModo('grid')} style={modo === 'grid' ? s.toggleActivo : s.toggleInactivo} title="Vista grid">⊞</button>
-          </div>
-
+            )
+          })}
         </div>
+      )}
 
-        <p style={s.contador}>
-          {loading ? 'Cargando...' : `${ordenes.length} orden${ordenes.length !== 1 ? 'es' : ''}${filtrosActivos > 0 ? ` · ${filtrosActivos} filtro${filtrosActivos !== 1 ? 's' : ''} activo${filtrosActivos !== 1 ? 's' : ''}` : ''}`}
-        </p>
+      {/* VISTA TABLA */}
+      {vistaModo === 'tabla' && (
+        <div className="card-cyber" style={{ padding: '1.25rem', overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#979faa', fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                <th style={{ padding: '0.75rem' }}>Matrícula</th>
+                <th style={{ padding: '0.75rem' }}>Cliente</th>
+                <th style={{ padding: '0.75rem' }}>Tipo</th>
+                <th style={{ padding: '0.75rem' }}>Estado</th>
+                <th style={{ padding: '0.75rem', textAlign: 'right' }}>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ordenes.map(o => (
+                <tr key={o.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <td style={{ padding: '0.75rem', fontWeight: '800', color: '#ffac7c' }}>{o.matricula}</td>
+                  <td style={{ padding: '0.75rem', color: '#f9fafb', fontWeight: '600' }}>{o.nombre_cliente}</td>
+                  <td style={{ padding: '0.75rem', color: '#9ca3af', textTransform: 'capitalize' }}>{o.tipo}</td>
+                  <td style={{ padding: '0.75rem', textTransform: 'capitalize', color: '#34d399', fontWeight: '700' }}>{o.estado.replace('_', ' ')}</td>
+                  <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                    <button onClick={() => navigate(`/ordenes/${o.id}/operaciones`)} className="btn-cyber-outline" style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', marginRight: '0.4rem' }}>
+                      Operaciones
+                    </button>
+                    <button onClick={() => navigate(`/ordenes/${o.id}/pago`)} className="btn-cyber-orange" style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}>
+                      {o.pagado ? '✓ Pagado' : 'Ver pagos'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-        {error && <p style={s.errorMsg}>{error}</p>}
-
-        {!loading && ordenes.length === 0 && !error && (
-          <div style={s.vacio}><p style={s.vacioTexto}>No hay órdenes que coincidan con los filtros actuales.</p></div>
-        )}
-
-        {modo === 'row' ? (
-          <div style={s.listaRow}>
-            {ordenes.map(o => (
-              <TarjetaRow key={o.id} o={o}
-                onPago={id => navigate(`/ordenes/${id}/pago`)}
-                onOperaciones={id => navigate(`/ordenes/${id}/operaciones`)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div style={s.listaGrid}>
-            {ordenes.map(o => (
-              <TarjetaGrid key={o.id} o={o}
-                onPago={id => navigate(`/ordenes/${id}/pago`)}
-                onOperaciones={id => navigate(`/ordenes/${id}/operaciones`)}
-              />
-            ))}
-          </div>
-        )}
-
-      </div>
     </div>
   )
 }
 
-const s = {
-  page:           { minHeight: '100vh', backgroundColor: 'var(--background)', padding: '2rem 1.5rem', display: 'flex', justifyContent: 'center' },
-  container:      { width: '100%', maxWidth: '1200px', display: 'flex', flexDirection: 'column', gap: '1.5rem' },
-  header:         { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' },
-  eyebrow:        { display: 'block', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)', color: 'var(--neutral-300)', letterSpacing: '0.12em', textTransform: 'uppercase' },
-  titulo:         { fontSize: 'var(--text-title)', fontWeight: 'var(--weight-bold)', color: 'var(--foreground)', margin: 0, lineHeight: 1.1 },
-  accent:         { color: 'var(--yellow-500)' },
-  btnNueva:       { backgroundColor: 'var(--yellow-500)', color: 'var(--background)', fontWeight: 'var(--weight-bold)', fontSize: 'var(--text-body)', padding: '0.65rem 1.25rem', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer' },
 
-  barraTop:       { display: 'flex', gap: '0.6rem', alignItems: 'center' },
-  inputBusqueda:  { width: '280px', flexShrink: 0, backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', color: 'var(--foreground)', borderRadius: 'var(--radius-md)', padding: '0.6rem 0.875rem', fontSize: 'var(--text-body)', outline: 'none' },
 
-  btnFiltros:     { display: 'flex', alignItems: 'center', gap: '0.3rem', backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', color: 'var(--neutral-200)', fontSize: 'var(--text-small)', fontWeight: 'var(--weight-medium)', padding: '0.55rem 0.875rem', borderRadius: 'var(--radius-md)', cursor: 'pointer', whiteSpace: 'nowrap' },
-  btnFiltrosActivo: { borderColor: 'var(--yellow-500)', color: 'var(--yellow-400)' },
-  filtrosBadge:   { backgroundColor: 'var(--yellow-500)', color: 'var(--background)', borderRadius: 'var(--radius-full)', fontSize: '0.65rem', fontWeight: 'var(--weight-bold)', padding: '0.1rem 0.4rem', lineHeight: 1 },
 
-  filtrosPanel:   { position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 50, backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)', width: '560px', overflow: 'hidden' },
-  filtrosPanelInner: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', padding: '1.25rem' },
-  filtroGrupo:    { display: 'flex', flexDirection: 'column', gap: '0.3rem' },
-  filtroLabel:    { fontSize: 'var(--text-xs)', color: 'var(--neutral-400)', textTransform: 'uppercase', letterSpacing: '0.07em' },
-  filtrosPie:     { display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', padding: '0.75rem 1.25rem', borderTop: '1px solid var(--border)', backgroundColor: 'var(--surface-raised)' },
-  btnLimpiar:     { backgroundColor: 'transparent', color: 'var(--danger)', fontSize: 'var(--text-small)', fontWeight: 'var(--weight-medium)', padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid rgba(229,72,77,0.3)', cursor: 'pointer' },
-  btnAplicar:     { backgroundColor: 'var(--yellow-500)', color: 'var(--background)', fontSize: 'var(--text-small)', fontWeight: 'var(--weight-bold)', padding: '0.4rem 0.875rem', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer' },
 
-  select:         { backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', color: 'var(--foreground)', borderRadius: 'var(--radius-md)', padding: '0.4rem 0.6rem', fontSize: 'var(--text-small)', outline: 'none', width: '100%' },
-  toggleLayout:   { display: 'flex', gap: '0.2rem', marginLeft: 'auto' },
-  toggleActivo:   { backgroundColor: 'var(--yellow-500)', color: 'var(--background)', fontWeight: 'var(--weight-bold)', fontSize: 'var(--text-body)', padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-md)', border: 'none', cursor: 'pointer' },
-  toggleInactivo: { backgroundColor: 'var(--surface-raised)', color: 'var(--neutral-300)', fontSize: 'var(--text-body)', padding: '0.5rem 0.75rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', cursor: 'pointer' },
 
-  contador:       { fontSize: 'var(--text-small)', color: 'var(--neutral-400)', margin: 0 },
-  errorMsg:       { fontSize: 'var(--text-small)', color: 'var(--danger)', backgroundColor: 'var(--danger-bg)', border: '1px solid rgba(229,72,77,0.25)', borderRadius: 'var(--radius-sm)', padding: '0.5rem 0.75rem', margin: 0 },
-  vacio:          { backgroundColor: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: '3rem', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  vacioTexto:     { fontSize: 'var(--text-body)', color: 'var(--neutral-400)', margin: 0 },
 
-  listaRow:       { display: 'flex', flexDirection: 'column', gap: '0.75rem' },
-  listaGrid:      { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' },
-
-  cardRow:        { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '1.25rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' },
-  cardRowMain:    { display: 'flex', gap: '2rem', alignItems: 'flex-start' },
-  cardRowIzq:     { display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: '180px' },
-  cardRowMid:     { display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center', flex: 1 },
-  cardRowDer:     { display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: '120px', textAlign: 'right' },
-  cardGrid:       { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' },
-  gridHeader:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  gridBadges:     { display: 'flex', flexWrap: 'wrap', gap: '0.35rem' },
-
-  matricula:      { fontSize: 'var(--text-body-lg)', fontWeight: 'var(--weight-bold)', color: 'var(--yellow-400)' },
-  clienteNombre:  { fontSize: 'var(--text-body)', color: 'var(--foreground)', fontWeight: 'var(--weight-medium)' },
-  cedula:         { fontSize: 'var(--text-small)', color: 'var(--neutral-300)' },
-  tipoBadge:      { fontSize: 'var(--text-xs)', color: 'var(--blue-300)', backgroundColor: 'rgba(51,133,214,0.1)', border: '1px solid rgba(51,133,214,0.25)', borderRadius: 'var(--radius-full)', padding: '0.15rem 0.5rem', fontWeight: 'var(--weight-medium)', textTransform: 'capitalize' },
-  pagoBadge:      { fontSize: 'var(--text-xs)', color: 'var(--neutral-200)', backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 'var(--radius-full)', padding: '0.15rem 0.5rem', fontWeight: 'var(--weight-medium)', textTransform: 'uppercase' },
-  fechaLabel:     { fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' },
-  fechaVal:       { fontSize: 'var(--text-small)', color: 'var(--neutral-200)' },
-  cardBtns:       { display: 'flex', gap: '0.5rem', flexWrap: 'wrap' },
-  btnDetalle:     { backgroundColor: 'var(--surface-raised)', color: 'var(--neutral-400)', fontSize: 'var(--text-small)', padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', cursor: 'not-allowed', opacity: 0.5 },
-  btnOperaciones: { backgroundColor: 'var(--blue-700)', color: 'var(--foreground)', fontSize: 'var(--text-small)', fontWeight: 'var(--weight-medium)', padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--blue-600)', cursor: 'pointer' },
-  btnPago:        { backgroundColor: 'var(--yellow-500)', color: 'var(--background)', fontSize: 'var(--text-small)', fontWeight: 'var(--weight-bold)', padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer' },
-  btnLinker:      { backgroundColor: 'transparent', color: 'var(--neutral-400)', fontSize: 'var(--text-small)', padding: '0.4rem 0.75rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', cursor: 'not-allowed', opacity: 0.5 },
-}
