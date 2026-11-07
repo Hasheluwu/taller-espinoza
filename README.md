@@ -117,26 +117,3 @@ Pruebas de interfaz aisladas: `frontend/test/workshop-preview.html` con Vite act
 Simula consumos, historial, agenda y expediente sin llamar a MySQL. Las pruebas
 automáticas usan una base simulada; aún se necesita validar el despliegue con MySQL.
 
-## Seguridad
-
-Al iniciar, el backend muestra avisos `[SEGURIDAD]` si detecta una configuración riesgosa.
-
-1. **Contraseña del administrador.** Cambia la contraseña de fábrica con
-   `cd backend` y `npm run cambiar-password`. Pide el correo y la contraseña nueva sin
-   mostrarla (mínimo 10 caracteres, con letras y números) y cierra las sesiones abiertas.
-2. **Usuario de MySQL propio.** No uses `root`. En MySQL, como administrador:
-   ```sql
-   CREATE USER 'taller_app'@'localhost' IDENTIFIED BY 'una-contraseña-larga';
-   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, REFERENCES ON taller_espinoza.* TO 'taller_app'@'localhost';
-   ```
-   Luego pon `DB_USER=taller_app` y esa contraseña en `backend/.env`. Los respaldos
-   (`npm run backup`) necesitan además `LOCK TABLES, SHOW VIEW, TRIGGER, EVENT` y crear bases
-   de verificación, así que pueden seguir usando una cuenta administradora aparte.
-3. **Clave de sesiones.** `JWT_SECRET` debe ser aleatoria y larga (ver `backend/.env.example`).
-   Cambiarla cierra todas las sesiones.
-4. **Secretos fuera del repositorio.** `backend/.env` no se sube a GitHub. `.env.example`
-   solo lleva valores vacíos.
-5. **Acceso a la API.** Solo responde a navegadores en este equipo o en la red local
-   (192.168.x.x, 10.x.x.x, 172.16-31.x.x). Para otra dirección, agrégala en `CORS_ORIGINS`.
-6. **Pruebas de seguridad.** Verificado el 6 de noviembre de 2026 sobre una copia aislada:
-   51 comprobaciones de acceso, sesiones, roles, inyección SQL, validación, archivos y cabeceras.
