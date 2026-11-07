@@ -1,36 +1,95 @@
-// Unfinished order registrations. The client and vehicle already exist; this keeps
-// the remaining form so the user can resume it later. One draft per vehicle and kind.
+// backend/src/routes/ordenBorradores.js
 const express = require('express')
 const pool = require('../db')
 const auth = require('../middleware/authMiddleware')
-const { fail, number } = require('../services/validation')
+const { fail } = require('../services/validation')
+const { resolveMatricula, aseguradoraToSlug } = require('../services/catalogs')
+
 const router = express.Router()
 router.use(auth)
-router.use((req, res, next) => ['administrador', 'secretaria'].includes(req.usuario.rol) ? next() : res.status(403).json({ message: 'No tienes permiso para gestionar borradores de órdenes.' }))
-const kind = value => { if (!['seguro', 'particular'].includes(value)) fail('Tipo de borrador inválido.'); return value }
-const run = action => async (req, res, next) => { try { res.json(await action(req)) } catch (err) { next(err) } }
+router.use((req, res, next) =>
+  ['administrador', 'secretaria'].includes(req.usuario.rol)
+    ? next()
+    : res.status(403).json({ message: 'No tienes permiso para gestionar borradores de órdenes.' })
+)
 
-router.get('/', run(async req => {
-  const [rows] = await pool.query(`SELECT b.id,b.tipo,b.paso,b.datos,b.actualizado,b.id_vehiculo,v.matricula,v.marca,v.modelo,v.aseguradora,c.nombre AS cliente,c.cedula
-    FROM orden_borrador b JOIN vehiculo v ON v.id=b.id_vehiculo JOIN cliente c ON c.id=v.id_cliente
-    WHERE b.tipo=? AND NOT EXISTS (SELECT 1 FROM orden o WHERE o.id_vehiculo=b.id_vehiculo AND o.fecha_creacion>=b.actualizado)
-    ORDER BY b.actualizado DESC LIMIT 100`, [kind(req.query.tipo)])
-  return rows.map(row => ({ ...row, datos: typeof row.datos === 'string' ? JSON.parse(row.datos) : row.datos }))
-}))
-router.put('/', run(async req => {
-  const { tipo, id_vehiculo, paso, datos } = req.body || {}
-  const vehicle = number(id_vehiculo, 'Vehículo', { positive: true, integer: true })
-  if (!['vehiculo', 'presupuesto', 'orden'].includes(paso)) fail('Paso del borrador inválido.')
-  const json = JSON.stringify(datos ?? {})
-  if (json.length > 200000) fail('El borrador es demasiado grande.')
-  const [[exists]] = await pool.query('SELECT id FROM vehiculo WHERE id=?', [vehicle])
-  if (!exists) fail('Vehículo no encontrado.', 404)
-  await pool.query(`INSERT INTO orden_borrador (tipo,id_vehiculo,paso,datos,creado_por) VALUES (?,?,?,?,?)
-    ON DUPLICATE KEY UPDATE paso=VALUES(paso),datos=VALUES(datos),creado_por=VALUES(creado_por),actualizado=CURRENT_TIMESTAMP`, [kind(tipo), vehicle, paso, json, req.usuario.id])
-  return { message: 'Borrador guardado.' }
-}))
-router.delete('/', run(async req => {
-  await pool.query('DELETE FROM orden_borrador WHERE tipo=? AND id_vehiculo=?', [kind(req.query.tipo), number(req.query.id_vehiculo, 'Vehículo', { positive: true, integer: true })])
-  return { message: 'Borrador eliminado.' }
-}))
+const drafts = new Map()
+const kind = value => {
+  if (!['seguro', 'particular'].includes(value)) fail('Tipo de borrador inválido.')
+  return value
+}
+const run = action => async (req, res, next) => {
+  try {
+    res.json(await action(req))
+  } catch (err) {
+    next(err)
+  }
+}
+
+router.get(
+  '/',
+  run(async req => {
+    const t = kind(req.query.tipo)
+    const results = []
+    for (const [, draft] of drafts.entries()) {
+      if (draft.tipo !== t) continue
+      const [rows] = await pool.query(
+        `SELECT v.matricula, ma.nombre AS marca, mo.nombre AS modelo, va.id_aseguradora, c.nombre AS cliente, c.numero_documento AS cedula
+         FROM vehiculo v
+         JOIN modelo mo ON mo.id_modelo = v.id_modelo
+         JOIN marca ma ON ma.id_marca = mo.id_marca
+         JOIN cliente c ON c.id_cliente = v.id_cliente
+         LEFT JOIN vehiculo_aseguradora va ON va.matricula = v.matricula
+         WHERE v.matricula = ?`,
+        [draft.matricula]
+      )
+      if (rows.length > 0) {
+        const v = rows[0]
+        results.push({
+          ...draft,
+          id_vehiculo: v.matricula,
+          matricula: v.matricula,
+          marca: v.marca,
+          modelo: v.modelo,
+          aseguradora: aseguradoraToSlug(v.id_aseguradora),
+          cliente: v.cliente,
+          cedula: v.cedula,
+        })
+      }
+    }
+    return results
+  })
+)
+
+router.put(
+  '/',
+  run(async req => {
+    const { tipo, id_vehiculo, paso, datos } = req.body || {}
+    if (!['vehiculo', 'presupuesto', 'orden'].includes(paso)) fail('Paso del borrador inválido.')
+    const matricula = await resolveMatricula(pool, id_vehiculo)
+    if (!matricula) fail('Vehículo no encontrado.', 404)
+    const t = kind(tipo)
+    const key = `${t}:${matricula}`
+    drafts.set(key, {
+      id: drafts.size + 1,
+      tipo: t,
+      matricula,
+      paso,
+      datos: datos ?? {},
+      actualizado: new Date().toISOString(),
+    })
+    return { message: 'Borrador guardado.' }
+  })
+)
+
+router.delete(
+  '/',
+  run(async req => {
+    const t = kind(req.query.tipo)
+    const matricula = await resolveMatricula(pool, req.query.id_vehiculo)
+    if (matricula) drafts.delete(`${t}:${matricula}`)
+    return { message: 'Borrador eliminado.' }
+  })
+)
+
 module.exports = router

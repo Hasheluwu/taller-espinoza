@@ -1,27 +1,36 @@
-const { createHash } = require('node:crypto')
-const key = value => createHash('sha256').update(value).digest('hex')
-module.exports = function loginAttempts(pool) {
-  return async function reserve(email, ip) {
-    const account = key(`account:${ip}:${email}`)
-    const scopes = [[key(`ip:${ip}`), 30], [account, 5]].sort(([a], [b]) => a.localeCompare(b))
-    const conn = await pool.getConnection()
-    try {
-      await conn.beginTransaction()
-      for (const [scope, limit] of scopes) {
-        await conn.query('INSERT INTO login_intento (clave,intentos,vence) VALUES (?,0,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 MINUTE)) ON DUPLICATE KEY UPDATE clave=clave', [scope])
-        const [[row]] = await conn.query('SELECT intentos,GREATEST(0,TIMESTAMPDIFF(SECOND,UTC_TIMESTAMP(),vence)) AS segundos FROM login_intento WHERE clave=? FOR UPDATE', [scope])
-        if (row.segundos <= 0) await conn.query('UPDATE login_intento SET intentos=1,vence=DATE_ADD(UTC_TIMESTAMP(),INTERVAL 15 MINUTE) WHERE clave=?', [scope])
-        else {
-          if (row.intentos >= limit) {
-            const error = new Error(`Demasiados intentos. Espera ${Math.ceil(row.segundos / 60)} minutos antes de volver a ingresar.`)
-            error.status = 429; error.retryAfter = Math.max(1, row.segundos); throw error
-          }
-          await conn.query('UPDATE login_intento SET intentos=intentos+1 WHERE clave=?', [scope])
-        }
-      }
-      await conn.commit()
-      return async () => { await pool.query('DELETE FROM login_intento WHERE clave=?', [account]) }
-    } catch (error) { await conn.rollback(); throw error }
-    finally { conn.release() }
+// backend/src/services/loginAttempts.js
+const buckets = new Map()
+const WINDOW_MS = 15 * 60 * 1000 // 15 minutos
+
+function checkAndIncrement(key, maxAttempts) {
+  const now = Date.now()
+  const record = buckets.get(key)
+  if (!record || record.expiresAt <= now) {
+    buckets.set(key, { count: 1, expiresAt: now + WINDOW_MS })
+    return
+  }
+  if (record.count >= maxAttempts) {
+    const retryAfter = Math.max(1, Math.ceil((record.expiresAt - now) / 1000))
+    const err = new Error('Demasiados intentos de inicio de sesión. Espera unos minutos antes de volver a intentarlo.')
+    err.status = 429
+    err.retryAfter = retryAfter
+    throw err
+  }
+  record.count += 1
+}
+
+module.exports = function createLoginAttempts() {
+  return async function reserveAttempt(email, ip) {
+    const cleanEmail = String(email || '').trim().toLowerCase()
+    const cleanIp = String(ip || 'unknown').trim()
+    const accountKey = `acc:${cleanEmail}:${cleanIp}`
+    const ipKey = `ip:${cleanIp}`
+
+    checkAndIncrement(ipKey, 30)
+    checkAndIncrement(accountKey, 5)
+
+    return async function clearAttempts() {
+      buckets.delete(accountKey)
+    }
   }
 }

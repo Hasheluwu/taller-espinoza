@@ -1,15 +1,16 @@
 // backend/src/routes/proveedores.js
-const express     = require('express')
-const pool        = require('../db')
+const express = require('express')
+const pool = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
 
 const router = express.Router()
 
-// ─── GET /api/proveedores ─────────────────────────────────────────────────────
-// Obtener todos los proveedores para los dropdowns / selects
+// GET /api/proveedores
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM proveedor ORDER BY nombre ASC')
+    const [rows] = await pool.query(
+      'SELECT id_proveedor AS id, id_proveedor, nombre, contacto, emite_factura_iva, fijo FROM proveedor ORDER BY nombre ASC'
+    )
     res.json(rows)
   } catch (err) {
     console.error('Error al obtener proveedores:', err)
@@ -17,8 +18,7 @@ router.get('/', requireAuth, async (req, res) => {
   }
 })
 
-// ─── POST /api/proveedores ────────────────────────────────────────────────────
-// Crear un nuevo proveedor (apoya creación inline desde Inventario)
+// POST /api/proveedores
 router.post('/', requireAuth, async (req, res) => {
   const { nombre, contacto, emite_factura_iva, fijo } = req.body
 
@@ -34,11 +34,14 @@ router.post('/', requireAuth, async (req, res) => {
         nombre.trim(),
         contacto ? contacto.trim() : null,
         Boolean(emite_factura_iva),
-        Boolean(fijo)
+        Boolean(fijo),
       ]
     )
 
-    const [nuevo] = await pool.query('SELECT * FROM proveedor WHERE id = ?', [result.insertId])
+    const [nuevo] = await pool.query(
+      'SELECT id_proveedor AS id, id_proveedor, nombre, contacto, emite_factura_iva, fijo FROM proveedor WHERE id_proveedor = ?',
+      [result.insertId]
+    )
     res.status(201).json(nuevo[0])
   } catch (err) {
     console.error('Error al crear proveedor:', err)

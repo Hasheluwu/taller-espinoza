@@ -1,25 +1,38 @@
 // backend/src/routes/presupuestos.js
-const express     = require('express')
-const pool        = require('../db')
+const express = require('express')
+const pool = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
+const { resolveMatricula } = require('../services/catalogs')
+const { packId, unpackId } = require('../services/validation')
 
 const router = express.Router()
-// The shared Proformas service owns all writes, totals and immutable issued copies.
-router.use((req, res, next) => req.method === 'GET' ? next() : res.status(409).json({ message: 'Gestiona este presupuesto desde Proformas. Actualiza la aplicación para usar el guardado completo.' }))
 router.use(require('../middleware/validateNumbers'))
 
-const IVA_RATE = 0.15 // IVA Nicaragua 15%
-
-// GET /api/presupuestos?id_vehiculo=N
-// Todos los presupuestos de un vehículo
+// GET /api/presupuestos?id_vehiculo=X
 router.get('/', requireAuth, async (req, res) => {
   const { id_vehiculo } = req.query
   if (!id_vehiculo) return res.status(400).json({ message: 'id_vehiculo es requerido.' })
 
   try {
+    const matricula = await resolveMatricula(pool, id_vehiculo)
+    if (!matricula) return res.json([])
+
     const [rows] = await pool.query(
-      'SELECT * FROM presupuesto WHERE id_vehiculo = ? ORDER BY fecha DESC, id DESC',
-      [id_vehiculo]
+      `SELECT
+         id_presupuesto AS id,
+         id_presupuesto,
+         matricula AS id_vehiculo,
+         matricula,
+         fecha,
+         estado,
+         subtotal,
+         iva,
+         total,
+         observaciones
+       FROM vw_totales_presupuesto
+       WHERE matricula = ?
+       ORDER BY fecha DESC, id_presupuesto DESC`,
+      [matricula]
     )
     res.json(rows)
   } catch (err) {
@@ -29,25 +42,26 @@ router.get('/', requireAuth, async (req, res) => {
 })
 
 // POST /api/presupuestos
-// Crear presupuesto — fecha y estado los pone el backend
 router.post('/', requireAuth, async (req, res) => {
-  const { id_vehiculo, subtotal, observaciones } = req.body
-
-  if (!id_vehiculo || subtotal === undefined || subtotal === '') {
+  const { id_vehiculo, observaciones } = req.body
+  if (!id_vehiculo) {
     return res.status(400).json({ message: 'Faltan campos obligatorios.' })
   }
 
-  const sub   = parseFloat(subtotal)
-  const iva   = parseFloat((sub * IVA_RATE).toFixed(2))
-  const total = parseFloat((sub + iva).toFixed(2))
-
   try {
+    const matricula = await resolveMatricula(pool, id_vehiculo)
+    if (!matricula) return res.status(404).json({ message: 'Vehículo no encontrado.' })
+
     const [result] = await pool.query(
-      `INSERT INTO presupuesto (id_vehiculo, fecha, estado, subtotal, iva, total, observaciones)
-       VALUES (?, CURDATE(), 'pendiente', ?, ?, ?, ?)`,
-      [id_vehiculo, sub, iva, total, observaciones?.trim() || null]
+      `INSERT INTO presupuesto (matricula, fecha, estado, observaciones)
+       VALUES (?, CURDATE(), 'pendiente', ?)`,
+      [matricula, observaciones?.trim() || null]
     )
-    const [nuevo] = await pool.query('SELECT * FROM presupuesto WHERE id = ?', [result.insertId])
+    const [nuevo] = await pool.query(
+      `SELECT id_presupuesto AS id, id_presupuesto, matricula AS id_vehiculo, matricula, fecha, estado, subtotal, iva, total, observaciones
+       FROM vw_totales_presupuesto WHERE id_presupuesto = ?`,
+      [result.insertId]
+    )
     res.status(201).json(nuevo[0])
   } catch (err) {
     console.error('Error al crear presupuesto:', err)
@@ -56,7 +70,6 @@ router.post('/', requireAuth, async (req, res) => {
 })
 
 // PATCH /api/presupuestos/:id/estado
-// Cambiar estado: aprobado | rechazado | pendiente
 router.patch('/:id/estado', requireAuth, async (req, res) => {
   const { estado } = req.body
   const validEstados = ['pendiente', 'aprobado', 'rechazado']
@@ -65,8 +78,12 @@ router.patch('/:id/estado', requireAuth, async (req, res) => {
   }
 
   try {
-    await pool.query('UPDATE presupuesto SET estado = ? WHERE id = ?', [estado, req.params.id])
-    const [updated] = await pool.query('SELECT * FROM presupuesto WHERE id = ?', [req.params.id])
+    await pool.query('UPDATE presupuesto SET estado = ? WHERE id_presupuesto = ?', [estado, req.params.id])
+    const [updated] = await pool.query(
+      `SELECT id_presupuesto AS id, id_presupuesto, matricula AS id_vehiculo, matricula, fecha, estado, subtotal, iva, total, observaciones
+       FROM vw_totales_presupuesto WHERE id_presupuesto = ?`,
+      [req.params.id]
+    )
     res.json(updated[0])
   } catch (err) {
     console.error('Error al actualizar estado:', err)
@@ -78,10 +95,16 @@ router.patch('/:id/estado', requireAuth, async (req, res) => {
 router.get('/:id/detalles', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT * FROM presupuesto_detalle WHERE id_presupuesto = ? ORDER BY id ASC',
+      'SELECT * FROM presupuesto_detalle WHERE id_presupuesto = ? ORDER BY num_linea ASC',
       [req.params.id]
     )
-    res.json(rows)
+    res.json(
+      rows.map(r => ({
+        ...r,
+        id: packId(r.id_presupuesto, r.num_linea),
+        aplica_iva: Boolean(r.aplica_iva),
+      }))
+    )
   } catch (err) {
     console.error('Error al obtener detalles:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
@@ -97,12 +120,19 @@ router.post('/:id/detalles', requireAuth, async (req, res) => {
   }
 
   try {
-    const [result] = await pool.query(
+    const [[maxRow]] = await pool.query(
+      'SELECT COALESCE(MAX(num_linea), 0) + 1 AS next_linea FROM presupuesto_detalle WHERE id_presupuesto = ?',
+      [req.params.id]
+    )
+    const numLinea = maxRow.next_linea
+
+    await pool.query(
       `INSERT INTO presupuesto_detalle
-        (id_presupuesto, tipo_linea, descripcion, cantidad, precio_unitario, aplica_iva)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+        (id_presupuesto, num_linea, tipo_linea, descripcion, cantidad, precio_unitario, aplica_iva)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         req.params.id,
+        numLinea,
         tipo_linea,
         descripcion.trim(),
         parseFloat(cantidad),
@@ -111,10 +141,14 @@ router.post('/:id/detalles', requireAuth, async (req, res) => {
       ]
     )
     const [nuevo] = await pool.query(
-      'SELECT * FROM presupuesto_detalle WHERE id = ?',
-      [result.insertId]
+      'SELECT * FROM presupuesto_detalle WHERE id_presupuesto = ? AND num_linea = ?',
+      [req.params.id, numLinea]
     )
-    res.status(201).json(nuevo[0])
+    res.status(201).json({
+      ...nuevo[0],
+      id: packId(nuevo[0].id_presupuesto, nuevo[0].num_linea),
+      aplica_iva: Boolean(nuevo[0].aplica_iva),
+    })
   } catch (err) {
     console.error('Error al crear detalle:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
@@ -124,7 +158,8 @@ router.post('/:id/detalles', requireAuth, async (req, res) => {
 // DELETE /api/presupuestos/detalles/:id
 router.delete('/detalles/:id', requireAuth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM presupuesto_detalle WHERE id = ?', [req.params.id])
+    const [idPres, numLinea] = unpackId(req.params.id, 'Detalle de presupuesto')
+    await pool.query('DELETE FROM presupuesto_detalle WHERE id_presupuesto = ? AND num_linea = ?', [idPres, numLinea])
     res.json({ message: 'Detalle eliminado.' })
   } catch (err) {
     console.error('Error al eliminar detalle:', err)

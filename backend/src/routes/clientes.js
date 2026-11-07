@@ -1,24 +1,53 @@
-const forms = require('../services/formValidation')
 // backend/src/routes/clientes.js
-const express     = require('express')
-const pool        = require('../db')
+const express = require('express')
+const pool = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
+const forms = require('../services/formValidation')
+const { detectTipoDocumentoId, ensureMunicipioId } = require('../services/catalogs')
 
 const router = express.Router()
 
-// ─── GET /api/clientes/buscar?cedula= ────────────────────────────────────────
-// Búsqueda exacta por cédula. Una cédula es única — no hay filtros adicionales.
+const CLIENTE_SELECT = `
+  SELECT
+    c.id_cliente AS id,
+    c.id_cliente,
+    c.nombre,
+    c.numero_documento AS cedula,
+    c.numero_documento,
+    c.id_tipo_documento,
+    td.nombre AS tipo_documento,
+    c.telefono,
+    c.fecha_nacimiento,
+    m.nombre AS municipio_residencia,
+    c.id_municipio,
+    c.direccion,
+    c.fecha_creacion
+  FROM cliente c
+  JOIN municipio m ON m.id_municipio = c.id_municipio
+  JOIN tipo_documento td ON td.id_tipo_documento = c.id_tipo_documento
+`
+
+// GET /api/clientes/buscar?cedula=
 router.get('/buscar', requireAuth, async (req, res) => {
   const { cedula } = req.query
-  if (!cedula || cedula.trim() === '')
-    return res.status(400).json({ message: 'La cédula es requerida.' })
+  if (!cedula || cedula.trim() === '') {
+    return res.status(400).json({ message: 'La cédula o documento es requerido.' })
+  }
   try {
+    const normalized = (() => {
+      try {
+        return require('../services/fieldRules').cedula(cedula)
+      } catch {
+        return cedula.trim()
+      }
+    })()
     const [rows] = await pool.query(
-      'SELECT * FROM cliente WHERE cedula = ? LIMIT 1',
-      [(() => { try { return require('../services/fieldRules').cedula(cedula) } catch { return cedula.trim() } })()]
+      `${CLIENTE_SELECT} WHERE c.numero_documento = ? OR REPLACE(c.numero_documento, '-', '') = REPLACE(?, '-', '') LIMIT 1`,
+      [normalized, normalized]
     )
-    if (rows.length === 0)
+    if (rows.length === 0) {
       return res.status(404).json({ message: 'Cliente no encontrado.' })
+    }
     res.json(rows[0])
   } catch (err) {
     console.error('Error al buscar cliente por cédula:', err)
@@ -26,41 +55,34 @@ router.get('/buscar', requireAuth, async (req, res) => {
   }
 })
 
-// ─── GET /api/clientes/sugerir ────────────────────────────────────────────────
-// Búsqueda flexible para el dropdown del input de búsqueda.
-//
-// Query params:
-//   q           — texto de búsqueda (mínimo 2 caracteres)
-//   modo        — 'nombre' | 'municipio' | 'telefono'  (default: nombre)
-//   fecha_desde — YYYY-MM-DD, filtra por fecha_creacion >= valor
-//   fecha_hasta — YYYY-MM-DD, filtra por fecha_creacion <= valor
+// GET /api/clientes/sugerir
 router.get('/sugerir', requireAuth, async (req, res) => {
   const { q, modo = 'nombre', fecha_desde, fecha_hasta } = req.query
 
-  if (!q || q.trim().length < 2)
+  if (!q || q.trim().length < 2) {
     return res.status(400).json({ message: 'Se necesitan al menos 2 caracteres.' })
+  }
 
-  const camposValidos = ['nombre', 'municipio', 'telefono']
-  const campo = camposValidos.includes(modo)
-    ? (modo === 'municipio' ? 'municipio_residencia' : modo)
-    : 'nombre'
+  const colMap = {
+    nombre: 'c.nombre',
+    municipio: 'm.nombre',
+    telefono: 'c.telefono',
+  }
+  const campo = colMap[modo] || 'c.nombre'
 
-  let sql = `
-    SELECT id, nombre, cedula, municipio_residencia, telefono, fecha_creacion
-    FROM cliente
-    WHERE ${campo} LIKE ?`
+  let sql = `${CLIENTE_SELECT} WHERE ${campo} LIKE ?`
   const params = [`%${q.trim()}%`]
 
   if (fecha_desde) {
-    sql += ` AND DATE(fecha_creacion) >= ?`
+    sql += ` AND DATE(c.fecha_creacion) >= ?`
     params.push(fecha_desde)
   }
   if (fecha_hasta) {
-    sql += ` AND DATE(fecha_creacion) <= ?`
+    sql += ` AND DATE(c.fecha_creacion) <= ?`
     params.push(fecha_hasta)
   }
 
-  sql += ` ORDER BY nombre ASC`
+  sql += ` ORDER BY c.nombre ASC`
 
   try {
     const [rows] = await pool.query(sql, params)
@@ -71,40 +93,57 @@ router.get('/sugerir', requireAuth, async (req, res) => {
   }
 })
 
-// ─── POST /api/clientes ───────────────────────────────────────────────────────
+// POST /api/clientes
 router.post('/', requireAuth, forms.middleware(forms.client), async (req, res) => {
-  const { nombre, cedula, telefono, fecha_nacimiento, municipio_residencia, direccion } = req.body
+  const { nombre, cedula, telefono, fecha_nacimiento, municipio_residencia, direccion, id_tipo_documento } = req.body
 
-  if (!nombre || !cedula || !telefono || !municipio_residencia)
+  if (!nombre || !cedula || !telefono || !municipio_residencia) {
     return res.status(400).json({ message: 'Faltan campos obligatorios.' })
+  }
 
+  const conn = await pool.getConnection()
   try {
-    const [existe] = await pool.query(
-      'SELECT id FROM cliente WHERE cedula = ? LIMIT 1',
+    await conn.beginTransaction()
+
+    const [existe] = await conn.query(
+      'SELECT id_cliente FROM cliente WHERE numero_documento = ? LIMIT 1',
       [cedula.trim()]
     )
-    if (existe.length > 0)
-      return res.status(409).json({ message: 'Ya existe un cliente con esa cédula.' })
+    if (existe.length > 0) {
+      await conn.rollback()
+      return res.status(409).json({ message: 'Ya existe un cliente con ese documento.' })
+    }
 
-    const [result] = await pool.query(
+    const idMunicipio = await ensureMunicipioId(conn, municipio_residencia)
+    const idTipoDoc = detectTipoDocumentoId(cedula, id_tipo_documento)
+
+    const [result] = await conn.query(
       `INSERT INTO cliente
-         (nombre, cedula, telefono, fecha_nacimiento, municipio_residencia, direccion)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (id_tipo_documento, numero_documento, nombre, telefono, fecha_nacimiento, id_municipio, direccion)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        nombre.trim(),
+        idTipoDoc,
         cedula.trim(),
+        nombre.trim(),
         telefono.trim(),
         fecha_nacimiento || null,
-        municipio_residencia.trim(),
+        idMunicipio,
         direccion?.trim() || null,
       ]
     )
-    const [nuevo] = await pool.query('SELECT * FROM cliente WHERE id = ?', [result.insertId])
+
+    await conn.commit()
+    const [nuevo] = await pool.query(`${CLIENTE_SELECT} WHERE c.id_cliente = ?`, [result.insertId])
     res.status(201).json(nuevo[0])
   } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'Ya existe un registro con esa cédula o matrícula.' })
+    await conn.rollback()
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Ya existe un registro con esa cédula o documento.' })
+    }
     console.error('Error al crear cliente:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
+  } finally {
+    conn.release()
   }
 })
 
