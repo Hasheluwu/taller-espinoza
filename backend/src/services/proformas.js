@@ -62,7 +62,7 @@ async function read(conn, id, lock = false) {
   const [detalles] = await conn.query('SELECT * FROM presupuesto_detalle WHERE id_presupuesto=? ORDER BY id', [id])
   const [ordenes] = await conn.query('SELECT id FROM orden WHERE id_presupuesto=? ORDER BY id', [id])
   const v = p.id_vehiculo ? await context(conn, p.id_vehiculo) : null
-  const [versiones] = await conn.query("SELECT version, DATE_FORMAT(emitida,'%Y-%m-%dT%H:%i:%sZ') AS emitida FROM proforma_version WHERE id_presupuesto=? ORDER BY version DESC", [id])
+  const [versiones] = await conn.query("SELECT version, DATE_FORMAT(emitida,'%Y-%m-%dT%H:%i:%sZ') AS emitida, JSON_UNQUOTE(JSON_EXTRACT(documento,'$.actualizada_desde_orden')) AS desde_orden FROM proforma_version WHERE id_presupuesto=? ORDER BY version DESC", [id])
   return { ...p, numero: meta?.numero ?? null, version: meta?.version ?? 0, fase: meta?.fase ?? 'anterior',
     es_cotizacion: !!meta?.es_cotizacion,
     seguro: meta?.seguro ?? (!v || v.aseguradora === 'ninguna' ? 'PARTICULAR' : v.aseguradora.toUpperCase()),

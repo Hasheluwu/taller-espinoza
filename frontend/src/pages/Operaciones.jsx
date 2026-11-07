@@ -1,3 +1,4 @@
+import ProformaUpdate from '../components/ProformaUpdate'
 import WorkersPicker from '../components/WorkersPicker'
 import { emptyWorkerRow, workersPayload, ROLE_LABELS } from '../lib/workers'
 import { workshopApi } from '../lib/workshopApi'
@@ -636,6 +637,7 @@ export default function Operaciones() {
   const [searchParams]                   = useSearchParams()
   const [seccionAbierta, setSeccion]     = useState(() => searchParams.get('seccion'))
   const [equipoVersion, setEquipoVersion] = useState(0)
+  const [cargosVersion, setCargosVersion] = useState(0)
   const [mostrarModalPago, setModalPago] = useState(false)
 
   useEffect(() => {
@@ -661,6 +663,7 @@ export default function Operaciones() {
   }, [id])
 
   function actualizarTotales() {
+    setCargosVersion(v => v + 1)
     apiFetch(`${API}/api/operaciones/${id}/recalcular`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
@@ -715,6 +718,9 @@ export default function Operaciones() {
               <button className="pf-text-link" onClick={() => navigate(`/proformas/${orden.id_presupuesto}`)}>Ver proforma →</button>
             )}
           </div>
+        )}
+        {!!orden?.cargos_desde_proforma && !orden.detalle_particular && Number(orden.id_presupuesto) > 0 && (
+          <ProformaUpdate idPresupuesto={orden.id_presupuesto} refresh={cargosVersion} />
         )}
         <button onClick={() => navigate(`/ordenes/${id}/expediente`)} style={s.btnSecondary}>Fotos, costos y entrega</button>
 

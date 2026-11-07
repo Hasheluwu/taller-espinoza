@@ -92,4 +92,10 @@ router.put('/:id', run((conn, req) => service.save(conn, req.params.id, req.body
 router.post('/:id/emitir', run((conn, req) => service.emit(conn, req.params.id, req.body.version, req.usuario.id), true))
 router.patch('/:id/estado', run((conn, req) => service.changeState(conn, req.params.id, req.body, req.usuario.id), true))
 router.post('/:id/orden', run((conn, req) => service.convert(conn, req.params.id, req.body, req.usuario.id), true))
+// Charges added to the order after conversion that the proforma does not show yet.
+router.get('/:id/cargos-pendientes', run(async (conn, req) => {
+  const { extras } = await require('../services/proformaUpdate').pendingCharges(conn, await service.read(conn, req.params.id))
+  return { cantidad: extras.length, cargos: extras }
+}))
+router.post('/:id/actualizar-desde-orden', run((conn, req) => require('../services/proformaUpdate').updateFromOrder(conn, req.params.id, req.usuario.id), true))
 module.exports = router
