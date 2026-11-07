@@ -1,3 +1,5 @@
+import { RULES } from '../lib/fieldRules'
+import InsuranceInvoice from '../components/InsuranceInvoice'
 import {InsuranceCorrection, InsuranceExcess} from '../components/InsuranceCorrection'
 import { useDeferredLoad } from '../hooks/useDeferredLoad'
 import { localDateTime } from '../lib/date'
@@ -7,6 +9,8 @@ import { apiFetch } from '../lib/api'
 import { useState, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
+// Received money cannot be dated in the future (Nicaragua time).
+const hoyManagua = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Managua' })
 const getToken = () => localStorage.getItem('token')
 const API      = ''
 const fmt = n =>
@@ -174,7 +178,7 @@ function FormPagoCliente({ idOrden, orden, saldo, onPagoCreado }) {
             onBlur={e  => Object.assign(e.target.style, s.input)} />
         </Campo>
         <Campo label="Fecha y hora" required>
-          <input type="datetime-local" value={form.fecha}
+          <input type="datetime-local" value={form.fecha} max={`${hoyManagua()}T23:59`}
             onChange={e => setForm(p => ({ ...p, fecha: e.target.value }))}
             style={{ ...s.input, colorScheme: 'dark' }} required
             onFocus={e => Object.assign(e.target.style, s.inputFocus)}
@@ -209,7 +213,7 @@ function FormPagoCliente({ idOrden, orden, saldo, onPagoCreado }) {
       </div>
       <Campo label="N° de recibo">
         <input type="text" value={form.numero_recibo}
-          onChange={e => setForm(p => ({ ...p, numero_recibo: e.target.value }))}
+          onChange={e => setForm(p => ({ ...p, numero_recibo: RULES.reference.format(e.target.value) }))} maxLength={30}
           placeholder="Ej: R-00145 (del talonario físico)" style={s.input}
           onFocus={e => Object.assign(e.target.style, s.inputFocus)}
           onBlur={e  => Object.assign(e.target.style, s.input)} />
@@ -285,7 +289,7 @@ function FormPagoSeguro({ idOrden, tipoPago, saldo, onPagoCreado }) {
             onBlur={e  => Object.assign(e.target.style, s.input)} />
         </Campo>
         <Campo label="Fecha recibido">
-          <input type="date" value={form.fecha_recibido}
+          <input type="date" value={form.fecha_recibido} max={hoyManagua()}
             onChange={e => setForm(p => ({ ...p, fecha_recibido: e.target.value }))}
             style={{ ...s.input, colorScheme: 'dark' }}
             onFocus={e => Object.assign(e.target.style, s.inputFocus)}
@@ -294,7 +298,7 @@ function FormPagoSeguro({ idOrden, tipoPago, saldo, onPagoCreado }) {
       </div>
       <Campo label="Referencia bancaria">
         <input type="text" value={form.referencia_bancaria}
-          onChange={e => setForm(p => ({ ...p, referencia_bancaria: e.target.value }))}
+          onChange={e => setForm(p => ({ ...p, referencia_bancaria: RULES.reference.format(e.target.value) }))} maxLength={100}
           placeholder="Ej: TRF-20260801-00342" style={s.input}
           onFocus={e => Object.assign(e.target.style, s.inputFocus)}
           onBlur={e  => Object.assign(e.target.style, s.input)} />
@@ -433,12 +437,12 @@ function ListaPagosSeguro({ pagos, onActualizar, onEliminar, puedeEliminar }) {
             {editandoId === p.id && (
               <div style={{...s.editSeguro, flexWrap: 'wrap'}}>
                 <InsuranceExcess value={formEdit} onChange={setFormEdit}/>
-                <input type="date" value={formEdit.fecha_recibido}
+                <input type="date" value={formEdit.fecha_recibido} max={hoyManagua()}
                   onChange={e => setFormEdit(f => ({ ...f, fecha_recibido: e.target.value }))}
                   style={{ ...s.input, colorScheme: 'dark', width: 'auto' }} />
                 <input type="text" placeholder="Referencia bancaria (opcional)"
                   value={formEdit.referencia_bancaria}
-                  onChange={e => setFormEdit(f => ({ ...f, referencia_bancaria: e.target.value }))}
+                  onChange={e => setFormEdit(f => ({ ...f, referencia_bancaria: RULES.reference.format(e.target.value) }))} maxLength={100}
                   style={{ ...s.input, flex: 1 }} />
                 <button onClick={() => confirmarRecibido(p.id)} disabled={guardando} style={s.btnConfirmar}>
                   {guardando ? '...' : 'Confirmar'}
@@ -481,7 +485,7 @@ function ModalEntrega({ idOrden, onCerrar, onEntregada }) {
         <p style={s.modalTexto}>Esta acción es definitiva. La orden pasará a estado "Entregado" y se registrará la fecha de entrega real.</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
           <label style={s.labelSmall}>N° de factura física <span style={s.opcional}>(opcional)</span></label>
-          <input type="text" value={factura} onChange={e => setFactura(e.target.value)}
+          <input type="text" value={factura} maxLength={30} onChange={e => setFactura(RULES.reference.format(e.target.value))}
             placeholder="Ej: F-00234" style={s.input}
             onFocus={e => Object.assign(e.target.style, s.inputFocus)}
             onBlur={e  => Object.assign(e.target.style, s.input)} />
@@ -578,7 +582,7 @@ export default function Pagos() {
             <span style={s.eyebrow}>Ruta 4 — Pagos · Orden #{id}</span>
             <h1 style={s.titulo}>Pagos — <span style={s.accent}>Orden #{id}</span></h1>
           </div>
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
             <button onClick={() => navigate(`/ordenes/${id}/operaciones`)} style={s.btnSecondary}>Operaciones</button>
             <button onClick={() => navigate(`/ordenes/${id}/expediente`)} style={s.btnSecondary}>Fotos y costos</button>
             <button onClick={() => navigate('/ordenes')} style={s.btnSecondary}>← Ver órdenes</button>
@@ -596,7 +600,7 @@ export default function Pagos() {
               {['tipo', 'tipo_pago', 'estado'].map(campo => (
                 <span key={campo} style={s.encBadge}>{orden[campo]?.replace('_', ' ')}</span>
               ))}
-              {orden.estado !== 'entregado' && orden.estado !== 'cancelado' && !entregada && (
+              {orden.estado === 'listo' && !entregada && (
                 <button onClick={() => setModalEntrega(true)} style={s.btnEntregar}>
                   Marcar como entregado ✓
                 </button>
@@ -608,8 +612,9 @@ export default function Pagos() {
           </div>
         )}
 
+        {esSeguro ? <InsuranceInvoice idOrden={id} historico={resumen}/> : <>
         <PaymentBalance resumen={resumen} esSeguro={esSeguro} />
-        {esSeguro && resumen && !resumen.configurado && editable && <PaymentAllocation idOrden={id} resumen={resumen} onSaved={setResumen} />}
+        {esSeguro && resumen && !resumen.pagador_unico && !resumen.configurado && editable && <PaymentAllocation idOrden={id} resumen={resumen} onSaved={setResumen} />}
 
         <div style={{ ...s.dosColumnas, gridTemplateColumns: resumen?.pagado ? '1fr' : 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}>
           {(resumen?.puede_cobrar_cliente || resumen?.puede_cobrar_seguro) && <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -619,14 +624,14 @@ export default function Pagos() {
             )}
           </div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={s.historialBloque}>
+            {(!esSeguro || !resumen?.pagador_unico || resumen?.pagos_cliente?.length > 0) && <div style={s.historialBloque}>
               <p style={s.historialTitulo}>Pagos del cliente</p>
               <ListaPagosCliente
                 pagos={resumen?.pagos_cliente || []}
                 orden={orden}
                 onEliminar={handleEliminarPagoCliente} puedeEliminar={esAdmin && editable && !resumen?.cliente_pagado}
               />
-            </div>
+            </div>}
             {esSeguro && (
               <div style={{ ...s.historialBloque, borderColor: 'var(--blue-700)' }}>
                 <p style={{ ...s.historialTitulo, color: 'var(--blue-300)' }}>
@@ -641,7 +646,7 @@ export default function Pagos() {
             )}
           </div>
         </div>
-
+        </>}
       </div>
     </div>
   )
@@ -649,7 +654,7 @@ export default function Pagos() {
 
 const s = {
   page:              { minHeight: '100vh', backgroundColor: 'var(--background)', padding: '2rem 1.5rem', display: 'flex', justifyContent: 'center' },
-  container:         { width: '100%', maxWidth: '1200px', display: 'flex', flexDirection: 'column', gap: '1.5rem' },
+  container:         { width: '100%', minWidth: 0, maxWidth: '1200px', display: 'flex', flexDirection: 'column', gap: '1.5rem' },
   header:            { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' },
   eyebrow:           { display: 'block', fontSize: 'var(--text-xs)', fontWeight: 'var(--weight-medium)', color: 'var(--neutral-300)', letterSpacing: '0.12em', textTransform: 'uppercase' },
   titulo:            { fontSize: 'var(--text-title)', fontWeight: 'var(--weight-bold)', color: 'var(--foreground)', margin: 0, lineHeight: 1.1 },

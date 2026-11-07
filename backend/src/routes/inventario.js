@@ -1,3 +1,4 @@
+const forms = require('../services/formValidation')
 // backend/src/routes/inventario.js
 const express     = require('express')
 const pool        = require('../db')
@@ -56,7 +57,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 // ─── POST /api/inventario ─────────────────────────────────────────────────────
 // Crear producto en inventario. Soporta proveedor existente o nuevo inline.
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, forms.middleware(b => { b.nombre = forms.text(b.nombre, 'Nombre del producto', 150) }), async (req, res) => {
   const {
     nombre,
     precio_unidad,
@@ -138,7 +139,7 @@ router.post('/', requireAuth, async (req, res) => {
 
 // ─── PUT /api/inventario/:id ──────────────────────────────────────────────────
 // Editar producto de inventario
-router.put('/:id', requireAuth, async (req, res) => {
+router.put('/:id', requireAuth, forms.middleware(b => { b.nombre = forms.text(b.nombre, 'Nombre del producto', 150) }), async (req, res) => {
   const { id } = req.params
   const { nombre, precio_unidad, stock_minimo, unidad_medida, fecha_expiracion, id_proveedor } = req.body
 

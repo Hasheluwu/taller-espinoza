@@ -24,6 +24,7 @@ function database(order, initial = []) {
             snapshot = structuredClone(state)
             return [[{ ...state.order }]]
           }
+          if (sql.startsWith('SELECT * FROM factura_seguro')) return [[]]
           const table = sql.includes('pago_cliente') ? 'client' : 'insurance'
           if (sql.startsWith('SELECT * FROM pago_')) {
             const rows = sql.includes('WHERE id_orden') ? state[table] : state[table].filter(p => p.id === Number(params[0]))
@@ -65,33 +66,28 @@ async function request(method, path, body = {}, params = { id_orden: '1' }, role
 }
 const abono = monto => ({ monto, tipo: 'abono', metodo: 'efectivo' })
 
-test('20k order accepts 9k client plus 12k insurer only with explicit admin excess confirmation', async () => {
-  currentPool=database({tipo_pago:'lafise',costo_total:20000,monto_cliente:9000,monto_seguro:11000})
-  await request('post','/:id_orden/cliente',abono(9000))
-  const payload={monto:12000,concepto:'pago_principal',estado:'recibido'}
-  assert.equal((await request('post','/:id_orden/seguro',payload)).code,409)
-  const explicit={...payload,confirmar_excedente:true,motivo_excedente:'Transferencia completa del seguro'}
-  assert.equal((await request('post','/:id_orden/seguro',explicit,{id_orden:'1'},'secretaria')).code,409)
-  const result=await request('post','/:id_orden/seguro',explicit)
-  assert.equal(result.code,201);assert.equal(result.data.resumen.pagado,true)
-  assert.equal(result.data.resumen.excedente_seguro,1000);assert.equal(currentPool.state.order.costo_total,20000)
+test('insurance orders reject new client or insurer installments even with excess confirmation', async () => {
+  for (const tipo_pago of ['lafise','iniser']) {
+    currentPool=database({tipo_pago,costo_total:20000,monto_cliente:9000,monto_seguro:11000})
+    const before=structuredClone(currentPool.state)
+    assert.equal((await request('post','/:id_orden/cliente',abono(9000))).code,409)
+    for (const role of ['administrador','secretaria']) {
+      const r=await request('post','/:id_orden/seguro',{monto:12000,concepto:'pago_principal',estado:'recibido',confirmar_excedente:true,motivo_excedente:'Antes se permitía el excedente'},{id_orden:'1'},role)
+      assert.equal(r.code,409);assert.match(r.data.message,/factura/)
+    }
+    assert.deepEqual(currentPool.state,before)
+  }
 })
-test('screenshot case can receive legacy 25k pending without losing prior 5700 or duplicating credit',async()=>{
+test('legacy insurance receipts and pending entries are read-only and remain available',async()=>{
  currentPool=database({tipo_pago:'lafise',costo_total:34500,monto_cliente:9500,monto_seguro:25000,estado:'entregado'},[{id:1,monto:9500}])
  currentPool.state.insurance=[{id:1,id_orden:1,monto:25000,estado:'pendiente'},{id:2,id_orden:1,monto:5700,estado:'recibido'}]
- assert.equal((await request('patch','/seguro/:id/estado',{estado:'recibido'},{id:'1'})).code,409)
- const body={estado:'recibido',confirmar_excedente:true,motivo_excedente:'Importe verificado en comprobante'}
- for(let i=0;i<2;i++)assert.equal((await request('patch','/seguro/:id/estado',body,{id:'1'})).code,200)
+ const before=structuredClone(currentPool.state)
+ assert.equal((await request('patch','/seguro/:id/estado',{estado:'recibido',confirmar_excedente:true,motivo_excedente:'Importe verificado'},{id:'1'})).code,409)
+ assert.equal((await request('put','/seguro/:id/pendiente',{monto:19300,motivo:'Corrección anterior'},{id:'1'})).code,409)
  const balance=(await request('get','/:id_orden/resumen')).data
- assert.equal(balance.excedente_seguro,5700);assert.equal(balance.seguro_recibido,30700);assert.equal(currentPool.state.audit.length,1)
-})
-test('incorrect pending amount on delivered order can be corrected with audit, preserving received payments',async()=>{
- currentPool=database({tipo_pago:'lafise',costo_total:34500,monto_cliente:9500,monto_seguro:25000,estado:'entregado'})
- currentPool.state.insurance=[{id:1,id_orden:1,monto:25000,estado:'pendiente'},{id:2,id_orden:1,monto:5700,estado:'recibido'}]
- const result=await request('put','/seguro/:id/pendiente',{monto:19300,motivo:'El anticipo ya fue registrado'},{id:'1'})
- assert.equal(result.code,200);assert.equal(result.data.monto,19300);assert.equal(currentPool.state.insurance[1].monto,5700)
- assert.match(currentPool.state.audit[0].at(-1),/25000.*19300/)
- assert.equal((await request('patch','/seguro/:id/estado',{estado:'recibido'},{id:'1'})).code,200)
+ assert.equal(balance.seguro_recibido,5700);assert.equal(balance.total_cliente,9500)
+ assert.equal(balance.puede_cobrar_seguro,false);assert.equal(balance.puede_cobrar_cliente,false)
+ assert.deepEqual(currentPool.state,before)
 })
 
 test('actual payment route persists installments and rejects the next payment after settlement', async () => {
@@ -114,19 +110,12 @@ test('audit failure rolls back the installment', async () => {
   assert.equal((await request('post', '/:id_orden/cliente', abono(5000))).code, 500)
   assert.equal(currentPool.state.client.length, 0)
 })
-test('pending insurer collection can be received twice without duplicating credit', async () => {
-  currentPool = database({ tipo_pago: 'lafise', monto_cliente: 10000, monto_seguro: 40000 })
-  await request('post', '/:id_orden/cliente', abono(10000))
-  await request('post', '/:id_orden/seguro', { monto: 40000, concepto: 'pago_principal', estado: 'pendiente' })
-  assert.equal((await request('get', '/:id_orden/resumen')).data.pagado, false)
-  for (let n = 0; n < 2; n++) assert.equal((await request('patch', '/seguro/:id/estado', { estado: 'recibido' }, { id: '1' })).code, 200)
-  const balance = await request('get', '/:id_orden/resumen')
-  assert.equal(balance.data.pagado, true); assert.equal(balance.data.gran_total, 50000)
-  assert.equal(currentPool.state.audit.length, 3)
-})
-test('distribution cannot reduce a party below already collected or reserved money', async () => {
-  currentPool = database({ tipo_pago: 'lafise', monto_cliente: 10000, monto_seguro: 40000 })
-  await request('post', '/:id_orden/cliente', abono(5000))
-  assert.equal((await request('put', '/:id_orden/distribucion', { monto_cliente: 4000, monto_seguro: 46000 })).code, 409)
-  assert.equal((await request('put', '/:id_orden/distribucion', { monto_cliente: 10000, monto_seguro: 1 })).code, 400)
+test('insurance payment distribution and deletion are blocked without altering history',async()=>{
+ currentPool=database({tipo_pago:'iniser',monto_cliente:10000,monto_seguro:40000},[{id:1,id_orden:1,monto:5000}])
+ currentPool.state.insurance=[{id:1,id_orden:1,monto:10000,estado:'recibido'}]
+ const before=structuredClone(currentPool.state)
+ assert.equal((await request('put','/:id_orden/distribucion',{monto_cliente:4000,monto_seguro:46000})).code,409)
+ assert.equal((await request('delete','/cliente/:id',{},{id:'1'})).code,409)
+ assert.equal((await request('delete','/seguro/:id',{},{id:'1'})).code,409)
+ assert.deepEqual(currentPool.state,before)
 })

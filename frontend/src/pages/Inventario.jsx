@@ -1,3 +1,4 @@
+import { isExpired } from '../lib/date'
 import { useDeferredLoad } from '../hooks/useDeferredLoad'
 import { apiFetch } from '../lib/api'
 // frontend/src/pages/Inventario.jsx
@@ -288,11 +289,12 @@ export default function Inventario() {
   }
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto' }}>
+    <div className="inventory-page">
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--foreground)' }}>📦 Control de Inventario</h1>
+          <span className="section-kicker">RECURSOS / ALMACÉN</span>
+          <h1 style={{ fontSize: '2.2rem', fontWeight: 'bold', color: 'var(--foreground)' }}>Inventario de materiales</h1>
           <p style={{ fontSize: '0.875rem', color: 'var(--neutral-400)' }}>Gestión de productos consumibles, stock bajo, compras e historial de movimientos.</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -312,7 +314,7 @@ export default function Inventario() {
             className="btn-cyber-emerald"
             style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
           >
-            🛒 Registrar Compra
+            Registrar compra
           </button>
 
           <button
@@ -320,7 +322,7 @@ export default function Inventario() {
             className="btn-cyber-cyan"
             style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
           >
-            ⚙️ Ajuste Manual
+            Ajuste manual
           </button>
 
           <button
@@ -328,7 +330,7 @@ export default function Inventario() {
             className="btn-cyber-outline"
             style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
           >
-            📜 Movimientos
+            Movimientos
           </button>
 
           <button
@@ -336,7 +338,7 @@ export default function Inventario() {
             className="btn-cyber-orange"
             style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
           >
-            + Nuevo Producto
+            + Nuevo producto
           </button>
         </div>
       </div>
@@ -345,17 +347,17 @@ export default function Inventario() {
       {success && <div style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#10B981', padding: '0.75rem', borderRadius: '0.375rem', marginBottom: '1rem', border: '1px solid #10B981' }}>{success}</div>}
 
       {/* ── Filtros ── */}
-      <div style={{ backgroundColor: 'var(--surface)', padding: '1rem', borderRadius: '0.5rem', border: '1px solid var(--border)', marginBottom: '1.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="inventory-filters" style={{ backgroundColor: 'var(--surface)', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--border)', marginBottom: '1.5rem', gap: '1rem', alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="Buscar producto o proveedor..."
+          aria-label="Buscar producto o proveedor" placeholder="Buscar producto o proveedor..."
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           style={{ flex: '1 1 200px', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
         />
 
         <select
-          value={filtroProveedor}
+          aria-label="Filtrar por proveedor" value={filtroProveedor}
           onChange={(e) => setFiltroProveedor(e.target.value)}
           style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
         >
@@ -364,7 +366,7 @@ export default function Inventario() {
         </select>
 
         <select
-          value={filtroUnidad}
+          aria-label="Filtrar por unidad" value={filtroUnidad}
           onChange={(e) => setFiltroUnidad(e.target.value)}
           style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
         >
@@ -392,10 +394,11 @@ export default function Inventario() {
             checked={filtroExpiracion}
             onChange={(e) => setFiltroExpiracion(e.target.checked)}
           />
-          <span>📅 Expiración Próxima</span>
+          <span>📅 Vencidos o por vencer</span>
         </label>
       </div>
 
+      <div className="inventory-results"><h2>Catálogo de materiales</h2><span>{loading ? 'Cargando…' : `${productos.length} productos en esta vista`}</span></div>
       {/* ── Grid de Productos ── */}
       {loading ? (
         <SkeletonGrid count={6} />
@@ -404,73 +407,18 @@ export default function Inventario() {
           {error ? 'No se pudo cargar el inventario. Revisa el mensaje anterior e intenta nuevamente.' : 'No se encontraron productos con los filtros seleccionados.'}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
+        <div className="inventory-products">
           {productos.map(p => {
+            const vencido = isExpired(p.fecha_expiracion)
             const stockBajo = Number(p.cantidad) <= Number(p.stock_minimo)
             return (
-              <div
-                key={p.id}
-                style={{
-                  backgroundColor: 'var(--surface)',
-                  border: stockBajo ? '1px solid #EF4444' : '1px solid var(--border)',
-                  borderRadius: '0.5rem',
-                  padding: '1rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  position: 'relative'
-                }}
-              >
-                {stockBajo && (
-                  <span style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#EF4444', fontSize: '0.75rem', padding: '0.15rem 0.5rem', borderRadius: '0.25rem', fontWeight: 600, border: '1px solid #EF4444' }}>
-                    Stock Bajo
-                  </span>
-                )}
-
-                <div>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--foreground)', marginBottom: '0.25rem', paddingRight: stockBajo ? '4rem' : '0' }}>{p.nombre}</h3>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-400)', marginBottom: '0.75rem' }}>
-                    Proveedor: <span style={{ color: 'var(--foreground)' }}>{p.proveedor_nombre || 'Sin asignar'}</span>
-                  </p>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem', backgroundColor: 'var(--background)', padding: '0.75rem', borderRadius: '0.375rem' }}>
-                    <div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--neutral-400)' }}>Disponible</span>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 'bold', color: stockBajo ? '#EF4444' : 'var(--yellow-400)' }}>
-                        {p.cantidad} <span style={{ fontSize: '0.75rem', color: 'var(--neutral-400)' }}>{p.unidad_medida}</span>
-                      </div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--neutral-400)' }}>Precio Unit.</span>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--foreground)' }}>
-                        C$ {Number(p.precio_unidad).toFixed(2)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {p.fecha_expiracion && (
-                    <div style={{ fontSize: '0.75rem', color: 'var(--neutral-400)', marginBottom: '0.5rem' }}>
-                      Expira: {p.fecha_expiracion.split('T')[0]}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                  <button disabled={Number(p.cantidad) <= 0} onClick={() => setConsumir(p)} className="btn-cyber-orange">Usar</button>
-                  <button
-                    onClick={() => setModalDetalle(p)}
-                    style={{ flex: 1, backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: '0.8rem' }}
-                  >
-                    🔍 Detalle
-                  </button>
-                  <button
-                    onClick={() => abrirEditarProducto(p)}
-                    style={{ flex: 1, backgroundColor: 'var(--yellow-500)', border: 'none', color: '#000', padding: '0.4rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}
-                  >
-                    ✏️ Editar
-                  </button>
-                </div>
-              </div>
+              <article key={p.id} className={`supply-card ${(stockBajo || vencido) ? 'is-low' : ''}`}>
+                <header><span className="supply-code">MAT / {String(p.id).padStart(3,'0')}</span><span className={`supply-state ${(stockBajo || vencido) ? 'low' : ''}`}>{vencido ? 'Vencido' : Number(p.cantidad) <= 0 ? 'Agotado' : stockBajo ? 'Reponer' : 'Disponible'}</span></header>
+                <h3>{p.nombre}</h3><p className="supply-provider">{p.proveedor_nombre || 'Proveedor sin asignar'}</p>
+                <div className="supply-quantity"><strong>{Number(p.cantidad).toLocaleString('es-NI',{maximumFractionDigits:2})}</strong><span>{p.unidad_medida}<small>en existencia</small></span></div>
+                <dl className="supply-details"><div><dt>Precio unitario</dt><dd>C$ {Number(p.precio_unidad).toFixed(2)}</dd></div><div><dt>Stock mínimo</dt><dd>{p.stock_minimo} {p.unidad_medida}</dd></div>{p.fecha_expiracion && <div><dt>Vencimiento</dt><dd>{p.fecha_expiracion.split('T')[0]}</dd></div>}</dl>
+                <footer><button className="text-action" onClick={() => setModalDetalle(p)}>Detalle</button><button className="text-action" onClick={() => abrirEditarProducto(p)}>Editar</button><button className="supply-use" disabled={vencido || Number(p.cantidad) <= 0} title={vencido ? "Material vencido: no se permite su consumo." : undefined} onClick={() => setConsumir(p)}>Usar material ↗</button></footer>
+              </article>
             )
           })}
         </div>
@@ -636,7 +584,7 @@ export default function Inventario() {
       {modalCompra && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '750px', maxHeight: '90vh', overflowY: 'auto', padding: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>🛒 Registrar Compra de Mercadería</h2>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>Registrar compra de Mercadería</h2>
 
             <form onSubmit={handleGuardarCompra} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -763,7 +711,7 @@ export default function Inventario() {
       {modalAjuste && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '480px', padding: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>⚙️ Ajuste Manual de Inventario</h2>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>Ajuste manual de Inventario</h2>
 
             <form onSubmit={handleGuardarAjuste} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>

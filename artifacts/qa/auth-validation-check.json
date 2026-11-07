@@ -1,0 +1,239 @@
+{
+  "database": "taller_proformas_qa_1793844179007",
+  "results": [
+    {
+      "check": "20 intentos fallidos consecutivos: comprobar límite",
+      "statuses": [
+        401,
+        401,
+        401,
+        401,
+        401,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429
+      ],
+      "ok": true
+    },
+    {
+      "check": "Login con correo rodeado de espacios",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true
+    },
+    {
+      "check": "Login con cuerpo JSON null",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Los datos enviados no tienen un formato válido. Revisa el formulario."
+    },
+    {
+      "check": "Login con intento de inyección SQL",
+      "status": 401,
+      "expected": [
+        400,
+        401
+      ],
+      "ok": true,
+      "message": "Credenciales incorrectas."
+    },
+    {
+      "check": "Acceso sin sesión",
+      "status": 401,
+      "expected": [
+        401
+      ],
+      "ok": true,
+      "message": "Inicia sesión para continuar."
+    },
+    {
+      "check": "Token alterado",
+      "status": 401,
+      "expected": [
+        401
+      ],
+      "ok": true,
+      "message": "Tu sesión venció. Inicia sesión nuevamente."
+    },
+    {
+      "check": "Cerrar sesión",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true
+    },
+    {
+      "check": "Reutilizar token después de salir",
+      "status": 401,
+      "expected": [
+        401
+      ],
+      "ok": true,
+      "message": "Usuario inactivo o inexistente."
+    },
+    {
+      "check": "Cliente: nombre y municipio con solo espacios",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Nombre: es obligatorio y admite hasta 150 caracteres."
+    },
+    {
+      "check": "Cliente: nacimiento en el futuro",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "La fecha de nacimiento no puede estar en el futuro."
+    },
+    {
+      "check": "Cliente: teléfono sin dígitos",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Teléfono: ingresa entre 8 y 15 dígitos; puedes usar prefijo, espacios y guiones."
+    },
+    {
+      "check": "Cliente: nombre supera 150 caracteres",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Nombre: es obligatorio y admite hasta 150 caracteres."
+    },
+    {
+      "check": "Cliente: nombre de tipo numérico",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Nombre: ingresa texto válido."
+    },
+    {
+      "check": "Vehículo: marca y modelo con espacios",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Marca: es obligatorio y admite hasta 50 caracteres."
+    },
+    {
+      "check": "Vehículo: año 2099",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Año de fabricación: usa un año entre 1901 y el próximo año modelo."
+    },
+    {
+      "check": "Vehículo: cliente inexistente",
+      "status": 404,
+      "expected": [
+        400,
+        404
+      ],
+      "ok": true,
+      "message": "El cliente seleccionado no existe."
+    },
+    {
+      "check": "Vehículo: aseguradora no admitida",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Selecciona Particular, LAFISE o INISER."
+    },
+    {
+      "check": "Inventario: precio negativo",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "precio_unidad: valor inválido."
+    },
+    {
+      "check": "Inventario: nombre de tipo numérico",
+      "status": 400,
+      "expected": [
+        400
+      ],
+      "ok": true,
+      "message": "Nombre del producto: ingresa texto válido."
+    },
+    {
+      "check": "Cliente válido se registra",
+      "status": 201,
+      "expected": [
+        201
+      ],
+      "ok": true
+    },
+    {
+      "check": "Cédula duplicada se rechaza",
+      "status": 409,
+      "expected": [
+        409
+      ],
+      "ok": true,
+      "message": "Ya existe un cliente con esa cédula."
+    },
+    {
+      "check": "Vehículo válido se registra",
+      "status": 201,
+      "expected": [
+        201
+      ],
+      "ok": true
+    },
+    {
+      "check": "Seis intentos simultáneos no evaden el límite de cinco",
+      "ok": true
+    },
+    {
+      "check": "Cambiar de correo no evade el límite por conexión",
+      "status": 429,
+      "expected": [
+        429
+      ],
+      "ok": true,
+      "message": "Demasiados intentos. Espera 15 minutos antes de volver a ingresar."
+    },
+    {
+      "check": "El acceso se recupera al vencer la espera",
+      "status": 200,
+      "expected": [
+        200
+      ],
+      "ok": true
+    }
+  ]
+}

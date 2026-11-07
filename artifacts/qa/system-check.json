@@ -1,0 +1,49 @@
+[
+  {
+    "check": "Autenticación real y bloqueo sin sesión",
+    "ok": true
+  },
+  {
+    "check": "Abonos 500 + 300 + 200 completan 1000; rechaza un pago extra",
+    "ok": true,
+    "status": 409
+  },
+  {
+    "check": "Garantía y vencimiento guardados",
+    "ok": true
+  },
+  {
+    "check": "Rechaza entrega anterior al ingreso",
+    "ok": true
+  },
+  {
+    "check": "Reintentos concurrentes y posteriores devuelven una sola orden; rechaza reutilización con otros datos",
+    "ok": true,
+    "id": 9
+  },
+  {
+    "check": "/api/ordenes?tipo_pago=particular",
+    "status": 200,
+    "ok": true
+  },
+  {
+    "check": "/api/taller/vehiculos",
+    "status": 200,
+    "ok": true
+  },
+  {
+    "check": "/api/taller/agenda?desde=2026-11-02&hasta=2026-11-08",
+    "status": 200,
+    "ok": true
+  },
+  {
+    "check": "/api/inventario",
+    "status": 200,
+    "ok": true
+  },
+  {
+    "check": "/api/proformas",
+    "status": 200,
+    "ok": true
+  }
+]

@@ -7,15 +7,15 @@ export function PaymentBalance({ resumen, esSeguro }) {
   return <section className="card-cyber" style={{ padding: '1.5rem' }} aria-label="Saldo de la orden">
     <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
       <h2>{resumen.pagado ? '✓ Pagado' : 'Saldo de la orden'}</h2>
-      <strong role="status" style={{ color: resumen.pagado ? '#83dfc0' : '#ffac7c' }}>{resumen.configurado ? `Pendiente: C$ ${fmt(resumen.saldo_total)}` : 'Total o distribución por definir'}</strong>
+      <strong role="status" style={{ color: resumen.pagado ? '#83dfc0' : '#ffac7c' }}>{resumen.configurado ? `Pendiente: C$ ${fmt(resumen.saldo_total)}` : (resumen.pagador_unico ? 'Total por definir' : 'Total o distribución por definir')}</strong>
     </div>
-    <p>Total: C$ {fmt(resumen.total_orden)} · Recibido: C$ {fmt(resumen.gran_total)}</p>
+    <p>Total: {Number(resumen.total_orden) > 0 ? `C$ ${fmt(resumen.total_orden)}` : 'Pendiente de calcular'} · Recibido: C$ {fmt(resumen.gran_total)}</p>
     {resumen.configurado && <progress aria-label="Progreso del pago" max={resumen.total_orden} value={resumen.aplicado_a_deuda ?? Math.min(resumen.gran_total, resumen.total_orden)} style={{ width: '100%', accentColor: '#83dfc0', margin: '16px 0' }}/>}
-    <p>Cliente: C$ {fmt(resumen.total_cliente)} abonados · {resumen.cliente_pagado ? 'Pagado' : `Pendiente C$ ${fmt(resumen.saldo_cliente)}`}</p>
-    {esSeguro && <p>Seguro: C$ {fmt(resumen.seguro_recibido)} recibidos · {resumen.seguro_pagado ? 'Pagado' : `Pendiente C$ ${fmt(resumen.saldo_seguro)}`} · Cobros por recibir C$ {fmt(resumen.seguro_pendiente)}</p>}
+    {(!esSeguro || !resumen.pagador_unico) && <p>Cliente: C$ {fmt(resumen.total_cliente)} abonados · {!resumen.configurado ? 'Pendiente de calcular' : resumen.cliente_pagado ? 'Pagado' : `Pendiente C$ ${fmt(resumen.saldo_cliente)}`}</p>}
+    {esSeguro && <p>Seguro: C$ {fmt(resumen.seguro_recibido)} recibidos · {!resumen.configurado ? 'Pendiente de calcular' : resumen.seguro_pagado ? 'Pagado' : `Pendiente C$ ${fmt(resumen.saldo_seguro)}`} · Cobros por recibir C$ {fmt(resumen.seguro_pendiente)}</p>}
     {resumen.pagado && <p>El total está cubierto. Puedes consultar e imprimir los recibos del historial.</p>}
     {resumen.excedente > 0 && <p role="alert">Excedente por conciliar: C$ {fmt(resumen.excedente)}. Cliente: C$ {fmt(resumen.excedente_cliente)} · Seguro: C$ {fmt(resumen.excedente_seguro)}. No forma parte de la venta ni de la ganancia. Su devolución o aplicación a otra orden requiere conciliación; este sistema no la realiza automáticamente.</p>}
-    {!resumen.configurado && <p>Define el total en las operaciones de la orden{esSeguro ? ' y distribúyelo entre cliente y seguro' : ''} antes de registrar pagos.</p>}
+    {!resumen.configurado && <p>Define el total en las operaciones de la orden{esSeguro && !resumen.pagador_unico ? ' y distribúyelo entre cliente y seguro' : ''} antes de registrar pagos.</p>}
   </section>
 }
 export function PaymentAllocation({ idOrden, resumen, onSaved }) {

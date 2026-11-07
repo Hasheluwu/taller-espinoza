@@ -72,3 +72,18 @@ test('numeric middleware rejects invalid inventory and purchase requests', () =>
     assert.ok(error); assert.equal(error.status, 400)
   }
 })
+
+test('new insured orders charge only insurance and follow recalculated totals', () => {
+ const order={...insured,pagador_unico:1}
+ let b=calculateSummary(order)
+ assert.equal(b.monto_cliente,0)
+ assert.equal(b.monto_seguro,50000)
+ assert.equal(b.puede_cobrar_cliente,false)
+ assert.throws(()=>validatePayment(order,b,1,'cliente'),/saldo disponible/)
+ b=calculateSummary({...order,costo_total:60000},[],[{monto:10000,estado:'recibido'}])
+ assert.equal(b.saldo_seguro,50000)
+ b=calculateSummary(order,[],[{monto:50000,estado:'recibido'}])
+ assert.equal(b.pagado,true)
+ assert.equal(b.puede_cobrar_seguro,false)
+ assert.equal(calculateSummary(insured).monto_cliente,10000,'legacy split is preserved')
+})

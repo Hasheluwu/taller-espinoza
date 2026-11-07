@@ -1,3 +1,5 @@
+import RuleInput from '../components/RuleInput'
+import { saveOrderDraft } from '../lib/orderDrafts'
 import { apiFetch } from '../lib/api'
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -57,6 +59,7 @@ function VehiculoCard({ vehiculo, seleccionado, onSeleccionar }) {
   )
 }
 
+const VEHICLE_RULES = { matricula: 'plate', chasis: 'serial', motor: 'serial' }
 function CampoTexto({ label, name, value, onChange, placeholder, type = 'text', requerido, opcional }) {
   return (
     <div style={s.field}>
@@ -64,13 +67,19 @@ function CampoTexto({ label, name, value, onChange, placeholder, type = 'text', 
         <span style={s.labelAccent}>{label}</span>
         {opcional && <span style={s.labelOpcional}> — opcional</span>}
       </label>
-      <input
+      {VEHICLE_RULES[name] ? <RuleInput rule={VEHICLE_RULES[name]} label={label} name={name} value={value} onChange={onChange} required={!!requerido} placeholder={placeholder} style={s.input}/> : <input
+        maxLength={{matricula:20,marca:50,modelo:50,color:50,chasis:50,motor:50}[name]}
+        pattern={type === 'text' && requerido ? '.*\\S.*' : undefined}
+        title={type === 'text' && requerido ? 'Escribe un valor; no puede contener solo espacios.' : undefined}
+        min={name === 'anio_fabricacion' ? 1901 : undefined}
+        max={name === 'anio_fabricacion' ? Number(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Managua' }).slice(0,4)) + 1 : undefined}
+        step={name === 'anio_fabricacion' ? 1 : undefined}
         type={type} name={name} value={value} onChange={onChange}
         placeholder={placeholder} required={!!requerido}
         style={s.input}
         onFocus={e => Object.assign(e.target.style, s.inputFocus)}
         onBlur={e  => Object.assign(e.target.style, s.input)}
-      />
+      />}
     </div>
   )
 }
@@ -79,7 +88,10 @@ export default function IngresarOrdenVehiculo() {
   const navigate = useNavigate()
   const location = useLocation()
 
+  const presupuestoCotizacion = location.state?.presupuestoCotizacion
+  const quoteData = presupuestoCotizacion?.datos || {}
   const cliente = location.state?.cliente ?? null
+  const particular = location.state?.particular === true
 
   const [vehiculos, setVehiculos]               = useState([])
   const [cargando, setCargando]                 = useState(true)
@@ -87,9 +99,9 @@ export default function IngresarOrdenVehiculo() {
   const [mostrarFormulario, setMostrarFormulario]   = useState(false)
 
   const [form, setForm] = useState({
-    matricula: '', marca: '', modelo: '',
-    anio_fabricacion: '', aseguradora: 'ninguna', color: '',
-    chasis: '', motor: '',
+    matricula: quoteData.placa || '', marca: quoteData.marca || '', modelo: quoteData.vehiculo || '',
+    anio_fabricacion: quoteData.anio || '', aseguradora: ['LAFISE','INISER'].includes(presupuestoCotizacion?.seguro) ? presupuestoCotizacion.seguro.toLowerCase() : 'ninguna', color: quoteData.color || '',
+    chasis: quoteData.chasis || '', motor: quoteData.motor || '',
   })
   const [errorCrear, setErrorCrear] = useState('')
   const [creando, setCreando]       = useState(false)
@@ -159,7 +171,11 @@ export default function IngresarOrdenVehiculo() {
   }
 
   function handleContinuar() {
-    navigate('/ordenes/nueva/presupuesto', { state: { cliente, vehiculo: vehiculoConfirmado } })
+    // A regular order registration is kept as a draft from here on, so it can be resumed.
+    if (!presupuestoCotizacion && !location.state?.destinoProforma && vehiculoConfirmado) {
+      saveOrderDraft({ particular, vehiculo: vehiculoConfirmado, paso: particular ? 'orden' : 'presupuesto', datos: { cliente, vehiculo: vehiculoConfirmado } })
+    }
+    navigate(particular || presupuestoCotizacion ? '/ordenes/nueva/orden' : location.state?.destinoProforma ? (location.state?.cotizacion ? '/cotizaciones/nueva' : location.state?.proformaParticular ? '/proformas/nueva?tipo=particular' : '/proformas/nueva') : '/ordenes/nueva/presupuesto', { state: { presupuesto: presupuestoCotizacion, cliente, vehiculo: vehiculoConfirmado, particular, borradorParticular: location.state?.borradorParticular } })
   }
 
   // Pantalla de bloqueo sin cliente
@@ -170,7 +186,7 @@ export default function IngresarOrdenVehiculo() {
           <div style={s.bloqueado}>
             <p style={s.bloqueadoTitulo}>⚠ Sin cliente seleccionado</p>
             <p style={s.bloqueadoTexto}>No se puede ingresar un vehículo sin un cliente confirmado. Volvé al paso anterior.</p>
-            <button onClick={() => navigate('/ordenes/nueva')} style={s.btnPrimary}>← Volver al Paso 1</button>
+            <button onClick={() => navigate(particular ? '/ordenes/nueva?tipo=particular' : location.state?.destinoProforma ? `/ordenes/nueva?destino=proforma${location.state?.cotizacion ? '&cotizacion=true' : location.state?.proformaParticular ? '&proforma=particular' : ''}` : '/ordenes/nueva', { state: { presupuestoCotizacion, borradorParticular: location.state?.borradorParticular } })} style={s.btnPrimary}>← Volver al Paso 1</button>
           </div>
         </div>
       </div>
@@ -181,12 +197,12 @@ export default function IngresarOrdenVehiculo() {
     <div style={s.page}>
       <div style={s.container}>
 
-        <WizardSteps currentStep={2} />
+        {particular ? <p className="section-kicker">TRABAJO PARTICULAR · PASO 2 DE 3</p> : <WizardSteps currentStep={2} />}
 
         {/* encabezado */}
         <div style={s.header}>
-          <span style={s.eyebrow}>Ruta 1 — Paso 2 de 4</span>
-          <h1 style={s.titulo}>Ingresar <span style={s.accent}>Orden</span></h1>
+          {!particular && <span style={s.eyebrow}>Ruta 1 — Paso 2 de 4</span>}
+          <h1 style={s.titulo}>{particular ? 'Trabajo particular · Vehículo' : 'Ingresar orden'}</h1>
           <p style={s.subtitulo}>Seleccioná el vehículo</p>
         </div>
 
@@ -195,7 +211,7 @@ export default function IngresarOrdenVehiculo() {
           <span style={s.clienteBannerLabel}>Cliente activo</span>
           <span style={s.clienteBannerNombre}>{cliente.nombre}</span>
           <span style={s.clienteBannerCedula}>{cliente.cedula}</span>
-          <button onClick={() => navigate('/ordenes/nueva')} style={s.clienteBannerCambiar}>Cambiar</button>
+          <button onClick={() => navigate(particular ? '/ordenes/nueva?tipo=particular' : location.state?.destinoProforma ? `/ordenes/nueva?destino=proforma${location.state?.cotizacion ? '&cotizacion=true' : location.state?.proformaParticular ? '&proforma=particular' : ''}` : '/ordenes/nueva', { state: { presupuestoCotizacion, borradorParticular: location.state?.borradorParticular } })} style={s.clienteBannerCambiar}>Cambiar</button>
         </div>
 
         <div style={s.cuerpo}>
@@ -242,7 +258,7 @@ export default function IngresarOrdenVehiculo() {
               <section style={s.seccion}>
                 <h2 style={s.seccionTitulo}>Nuevo <span style={s.accent}>vehículo</span></h2>
                 <form onSubmit={handleCrearVehiculo} style={s.form}>
-                  <CampoTexto label="Matrícula"          name="matricula"        value={form.matricula}        onChange={handleFormChange} placeholder="Ej: M-123456"           requerido />
+                  <CampoTexto label="Matrícula"          name="matricula"        value={form.matricula}        onChange={handleFormChange} placeholder="Ej: M 123456"           requerido />
                   <CampoTexto label="Marca"              name="marca"            value={form.marca}            onChange={handleFormChange} placeholder="Ej: Toyota"              requerido />
                   <CampoTexto label="Modelo"             name="modelo"           value={form.modelo}           onChange={handleFormChange} placeholder="Ej: Corolla"             requerido />
                   <CampoTexto label="Año de fabricación" name="anio_fabricacion" value={form.anio_fabricacion} onChange={handleFormChange} placeholder="Ej: 2018" type="number" requerido />
@@ -250,7 +266,7 @@ export default function IngresarOrdenVehiculo() {
 
                   <div style={s.field}>
                     <label style={s.label}><span style={s.labelAccent}>Aseguradora</span></label>
-                    <select name="aseguradora" value={form.aseguradora} onChange={handleFormChange} style={s.input}>
+                    <select disabled={particular} name="aseguradora" value={form.aseguradora} onChange={handleFormChange} style={s.input}>
                       <option value="ninguna">Ninguna</option>
                       <option value="lafise">LAFISE</option>
                       <option value="iniser">INISER</option>

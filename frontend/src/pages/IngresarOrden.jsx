@@ -1,7 +1,10 @@
+import RuleInput from '../components/RuleInput'
+import { RULES } from '../lib/fieldRules'
+import PlaceCombobox from '../components/PlaceCombobox'
 import { apiFetch } from '../lib/api'
 // frontend/src/pages/IngresarOrden.jsx
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import WizardSteps from '../components/WizardSteps'
 
 const getToken = () => localStorage.getItem('token')
@@ -24,7 +27,7 @@ function ClienteCard({ cliente }) {
     { label: 'Nombre',    valor: cliente.nombre },
     { label: 'Cédula',    valor: cliente.cedula },
     { label: 'Teléfono',  valor: cliente.telefono },
-    { label: 'Municipio', valor: cliente.municipio_residencia },
+    { label: 'Departamento', valor: cliente.municipio_residencia },
     { label: 'Dirección', valor: cliente.direccion || '—' },
   ]
   return (
@@ -57,7 +60,7 @@ function PanelFiltros({ modo, setModo, fechaDesde, setFechaDesde, fechaHasta, se
         <div style={s.filtroChips}>
           {[
             { val: 'nombre',    txt: 'Nombre' },
-            { val: 'municipio', txt: 'Municipio' },
+            { val: 'municipio', txt: 'Departamento' },
             { val: 'telefono',  txt: 'Teléfono' },
           ].map(op => (
             <button
@@ -126,21 +129,29 @@ function PanelFiltros({ modo, setModo, fechaDesde, setFechaDesde, fechaHasta, se
   )
 }
 
+const CLIENT_RULES = { nombre: 'name', cedula: 'cedula', telefono: 'phone' }
+
 // ─── campo de texto reutilizable ──────────────────────────────────────────────
 function CampoTexto({ label, name, value, onChange, placeholder, type = 'text', requerido, opcional, disabled }) {
   return (
     <div style={s.field}>
-      <label style={s.label}>
+      <label style={s.label} htmlFor={`campo-${name}`}>
         <span style={s.labelAccent}>{label}</span>
         {opcional && <span style={s.labelOpcional}> — opcional</span>}
       </label>
-      <input
+      {name === 'municipio_residencia' ? <PlaceCombobox id={`campo-${name}`} name={name} value={value} onChange={onChange} required={!!requerido} style={s.input}/>
+        : CLIENT_RULES[name] ? <RuleInput id={`campo-${name}`} rule={CLIENT_RULES[name]} label={label} name={name} value={value} onChange={onChange} required={!!requerido} placeholder={placeholder} style={s.input}/>
+        : <input id={`campo-${name}`}
+        maxLength={{nombre:150,cedula:20,telefono:20,municipio_residencia:100,direccion:255}[name]}
+        pattern={type === 'text' && requerido ? '.*\\S.*' : undefined}
+        title={type === 'text' && requerido ? 'Escribe un valor; no puede contener solo espacios.' : undefined}
+        max={name === 'fecha_nacimiento' ? new Date().toLocaleDateString('en-CA', { timeZone: 'America/Managua' }) : undefined}
         type={type} name={name} value={value} onChange={onChange}
         placeholder={placeholder} required={!!requerido} disabled={!!disabled}
         style={disabled ? s.inputDisabled : s.input}
         onFocus={e => !disabled && Object.assign(e.target.style, s.inputFocus)}
         onBlur={e  => Object.assign(e.target.style, disabled ? s.inputDisabled : s.input)}
-      />
+      />}
     </div>
   )
 }
@@ -148,6 +159,11 @@ function CampoTexto({ label, name, value, onChange, placeholder, type = 'text', 
 // ─── componente principal ─────────────────────────────────────────────────────
 export default function IngresarOrden() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const presupuestoCotizacion = location.state?.presupuestoCotizacion
+  const quoteData = presupuestoCotizacion?.datos || {}
+  const particular = new URLSearchParams(useLocation().search).get('tipo') === 'particular'
+  const destinoProforma = new URLSearchParams(useLocation().search).get('destino') === 'proforma'
 
   const [modo, setModo] = useState('buscar') // 'buscar' | 'agregar'
 
@@ -171,8 +187,8 @@ export default function IngresarOrden() {
 
   // ── formulario de creación ─────────────────────────────────────────────────
   const [form, setForm] = useState({
-    nombre: '', cedula: '', telefono: '',
-    fecha_nacimiento: '', municipio_residencia: '', direccion: '',
+    nombre: quoteData.cliente || '', cedula: quoteData.cedula || '', telefono: quoteData.telefono || '',
+    fecha_nacimiento: '', municipio_residencia: quoteData.municipio_residencia || '', direccion: quoteData.direccion || '',
   })
   const [errorCrear, setErrorCrear] = useState('')
   const [creando, setCreando]       = useState(false)
@@ -184,7 +200,7 @@ export default function IngresarOrden() {
 
   const placeholders = {
     nombre:    'Ej: María López...',
-    municipio: 'Ej: Masaya...',
+    municipio: 'Ej: Masaya, León...',
     telefono:  'Ej: 8888-1234...',
   }
 
@@ -273,6 +289,10 @@ export default function IngresarOrden() {
   async function handleCrearCliente(e) {
     e.preventDefault()
     setErrorCrear('')
+    if (!/^\+?[\d\s()-]+$/.test(form.telefono.trim()) || !/^\d{8,15}$/.test(form.telefono.replace(/\D/g, ''))) {
+      setErrorCrear('Teléfono: ingresa entre 8 y 15 dígitos; puedes usar prefijo, espacios y guiones.')
+      return
+    }
     setClienteConfirmado(null)
     setCreando(true)
     try {
@@ -322,11 +342,11 @@ export default function IngresarOrden() {
     <div style={s.page}>
       <div style={s.container}>
 
-        <WizardSteps currentStep={1} />
+        {particular ? <p className="section-kicker">TRABAJO PARTICULAR · PASO 1 DE 3</p> : <WizardSteps currentStep={1} />}
 
         <div style={s.header}>
-          <span style={s.eyebrow}>Ruta 1 — Paso 1 de 4</span>
-          <h1 style={s.titulo}>Ingresar <span style={s.accent}>Orden</span></h1>
+          {!particular && <span style={s.eyebrow}>Ruta 1 — Paso 1 de 4</span>}
+          <h1 style={s.titulo}>{particular ? 'Trabajo particular · Cliente' : 'Ingresar orden'}</h1>
           <p style={s.subtitulo}>Identificación del cliente</p>
         </div>
 
@@ -349,7 +369,7 @@ export default function IngresarOrden() {
                 <label style={agregandoActivo ? s.labelDim : s.label}>
                   <span style={agregandoActivo ? s.accentDim : s.labelAccent}>
                     {busqModo === 'nombre'    && 'Buscar por nombre'}
-                    {busqModo === 'municipio' && 'Buscar por municipio'}
+                    {busqModo === 'municipio' && 'Buscar por departamento'}
                     {busqModo === 'telefono'  && 'Buscar por teléfono'}
                   </span>
                   <span style={s.labelOpcional}> — seleccioná del desplegable</span>
@@ -449,8 +469,8 @@ export default function IngresarOrden() {
                     ref={inputCedulaRef}
                     type="text"
                     value={cedulaBusqueda}
-                    onChange={e => setCedulaBusqueda(e.target.value)}
-                    placeholder="Ej: 001-123456-0001A"
+                    onChange={e => setCedulaBusqueda(RULES.cedula.format(e.target.value))}
+                    placeholder="Ej: 001-010190-0001A"
                     disabled={agregandoActivo}
                     style={agregandoActivo ? s.inputDisabled : s.input}
                     onFocus={e => !agregandoActivo && Object.assign(e.target.style, s.inputFocus)}
@@ -489,9 +509,9 @@ export default function IngresarOrden() {
                 </div>
                 <form onSubmit={handleCrearCliente} style={s.form}>
                   <CampoTexto label="Nombre completo"         name="nombre"               value={form.nombre}               onChange={handleFormChange} placeholder="Ej: María López García"           requerido />
-                  <CampoTexto label="Cédula"                  name="cedula"               value={form.cedula}               onChange={handleFormChange} placeholder="Ej: 001-123456-0001A"             requerido />
+                  <CampoTexto label="Cédula"                  name="cedula"               value={form.cedula}               onChange={handleFormChange} placeholder="Ej: 001-010190-0001A"             requerido />
                   <CampoTexto label="Teléfono"                name="telefono"             value={form.telefono}             onChange={handleFormChange} placeholder="Ej: 8888-1234"                    requerido />
-                  <CampoTexto label="Municipio de residencia" name="municipio_residencia" value={form.municipio_residencia} onChange={handleFormChange} placeholder="Ej: Managua"                      requerido />
+                  <CampoTexto label="Departamento de residencia" name="municipio_residencia" value={form.municipio_residencia} onChange={handleFormChange} placeholder="Escribe o elige: Managua, Masaya…"                      requerido />
                   <CampoTexto label="Fecha de nacimiento"     name="fecha_nacimiento"     value={form.fecha_nacimiento}     onChange={handleFormChange} type="date"                                     opcional />
                   <CampoTexto label="Dirección"               name="direccion"            value={form.direccion}            onChange={handleFormChange} placeholder="Ej: Reparto Las Brisas, casa #14" opcional />
                   {errorCrear && <p style={s.errorMsg}>{errorCrear}</p>}
@@ -505,7 +525,7 @@ export default function IngresarOrden() {
             {/* ── continuar ── */}
             {clienteConfirmado && (
               <button
-                onClick={() => navigate('/ordenes/nueva/vehiculo', { state: { cliente: clienteConfirmado } })}
+                onClick={() => navigate('/ordenes/nueva/vehiculo', { state: { presupuestoCotizacion, cliente: clienteConfirmado, destinoProforma, cotizacion: new URLSearchParams(location.search).get('cotizacion') === 'true', proformaParticular: new URLSearchParams(location.search).get('proforma') === 'particular', particular, borradorParticular: location.state?.borradorParticular } })}
                 style={s.btnContinuar}
               >
                 Continuar con <span style={s.btnContinuarNombre}>{clienteConfirmado.nombre}</span> →

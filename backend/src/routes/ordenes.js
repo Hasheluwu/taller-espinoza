@@ -1,9 +1,12 @@
+const { validateDates, requestKey, claim } = require('../services/orderCreation')
 // backend/src/routes/ordenes.js
 const express     = require('express')
 const pool        = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
 
 const { calculateSummary, summary } = require('../services/billing')
+const privateWork = require('../services/privateWork')
+const initialActivities = require('../services/initialActivities')
 const router = express.Router()
 router.use(require('../middleware/validateNumbers'))
 const changeOrderState = require('../handlers/changeOrderState')(pool)
@@ -41,7 +44,8 @@ router.get('/', requireAuth, async (req, res) => {
         o.danos_ocultos,
         o.fecha_ingreso,
         o.fecha_entrega_estimada,
-        o.costo_total, o.monto_cliente, o.monto_seguro,
+        o.id_presupuesto, o.costo_total, o.monto_cliente, o.monto_seguro, o.pagador_unico,
+        (SELECT f.estado FROM factura_seguro f WHERE f.id_orden=o.id) AS estado_factura,
         (SELECT COALESCE(SUM(pc.monto), 0) FROM pago_cliente pc WHERE pc.id_orden = o.id) AS abonado_cliente,
         (SELECT COALESCE(SUM(ps.monto), 0) FROM pago_seguro ps WHERE ps.id_orden = o.id AND ps.estado = 'recibido') AS abonado_seguro,
         v.matricula,
@@ -106,7 +110,7 @@ router.get('/', requireAuth, async (req, res) => {
     }
 
     const [rows] = await pool.query(sql, params)
-    res.json(rows.map(o => ({ ...o, pagado: calculateSummary(o, [{ monto: o.abonado_cliente }], [{ monto: o.abonado_seguro, estado: 'recibido' }]).pagado })))
+    res.json(rows.map(o => ({ ...o, pagado: o.estado_factura ? o.estado_factura === 'pagada' : calculateSummary(o, [{ monto: o.abonado_cliente }], [{ monto: o.abonado_seguro, estado: 'recibido' }]).pagado })))
   } catch (err) {
     console.error('Error al listar órdenes:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
@@ -210,7 +214,8 @@ router.get('/:id', requireAuth, async (req, res) => {
     )
     if (rows.length === 0) return res.status(404).json({ message: 'Orden no encontrada.' })
     const balance = await summary(pool, rows[0])
-    res.json({ ...rows[0], pagado: balance.pagado })
+    const [[document]] = await pool.query('SELECT detalle, observaciones FROM orden_particular_documento WHERE id_orden=?', [req.params.id])
+    res.json({ ...rows[0], pagado: balance.pagado, detalle_particular: document ? { ...(typeof document.detalle === 'string' ? JSON.parse(document.detalle) : document.detalle), observaciones: document.observaciones } : null })
   } catch (err) {
     console.error('Error al obtener orden:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
@@ -255,15 +260,22 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'Tipo de pago inválido.' })
   }
 
+  try { requestKey(req.body.solicitud); validateDates(req.body) }
+  catch (error) { return res.status(error.status || 400).json({ message: error.message }) }
+
   const esConSeguro = tipo_pago === 'lafise' || tipo_pago === 'iniser'
 
-  if (esConSeguro && (!numero_tramite || !numero_orden_seguro)) {
-    return res.status(400).json({
-      message: 'Número de trámite y número de orden de seguro son obligatorios para órdenes con aseguradora.',
-    })
+  if (esConSeguro && monto_cliente != null && Number(monto_cliente) !== 0) return res.status(400).json({ message: 'El total de la orden corresponde a la aseguradora.' })
+
+  let tramiteValidado = null
+  if (esConSeguro) {
+    try { tramiteValidado = require('../services/fieldRules').claim(numero_tramite, { label: tipo_pago === 'iniser' ? 'Número de reclamo de INISER' : 'Número de trámite de LAFISE' }) }
+    catch (error) { return res.status(400).json({ message: error.message }) }
   }
 
   if (id_presupuesto) {
+    const [managed] = await pool.query('SELECT id_presupuesto FROM proforma_documento WHERE id_presupuesto=?', [id_presupuesto])
+    if (managed.length) return res.status(409).json({ message: 'Crea la orden desde la proforma aprobada para trasladar sus cargos una sola vez.' })
     const [budget] = await pool.query('SELECT id, id_vehiculo, estado FROM presupuesto WHERE id = ?', [id_presupuesto])
     if (!budget.length || Number(budget[0].id_vehiculo) !== Number(id_vehiculo) || budget[0].estado === 'rechazado') {
       return res.status(400).json({ message: 'El presupuesto debe pertenecer al vehículo y no estar rechazado.' })
@@ -285,8 +297,14 @@ router.post('/', requireAuth, async (req, res) => {
   // ── insert ────────────────────────────────────────────────────────────────
   const id_usuario = req.usuario.id   // viene del middleware JWT (req.usuario según authMiddleware)
 
+  let conn
   try {
-    const [result] = await pool.query(
+    const initial = !esConSeguro ? (req.body.detalle_particular ? privateWork(req.body.detalle_particular) : initialActivities(req.body.actividades)) : null
+    conn = await pool.getConnection()
+    await conn.beginTransaction()
+    const previous = await claim(conn, id_usuario, req.body)
+    if (previous) { await conn.commit(); return res.status(200).json(previous) }
+    const [result] = await conn.query(
       `INSERT INTO orden (
          id_vehiculo,
          id_presupuesto,
@@ -311,7 +329,8 @@ router.post('/', requireAuth, async (req, res) => {
          obra_interna,
          danos_ocultos,
          fecha_creacion,
-         creado_por
+         creado_por,
+         pagador_unico
        ) VALUES (
          ?, ?, ?, ?, ?, ?, NULL,
          'recibido',
@@ -324,7 +343,7 @@ router.post('/', requireAuth, async (req, res) => {
          ?, ?,
          ?,
          CURRENT_TIMESTAMP,
-         ?
+         ?, TRUE
        )`,
       [
         id_vehiculo,
@@ -336,9 +355,9 @@ router.post('/', requireAuth, async (req, res) => {
         es_garantia ? 1 : 0,
         (es_garantia && fecha_vencimiento_garantia) ? fecha_vencimiento_garantia : null,
         tipo_pago,
-        monto_seguro  != null ? parseFloat(monto_seguro)  : null,
-        monto_cliente != null ? parseFloat(monto_cliente) : null,
-        esConSeguro ? (numero_tramite    ?? null) : null,
+        null,
+        esConSeguro ? 0 : null,
+        esConSeguro ? tramiteValidado : null,
         esConSeguro ? (numero_orden_seguro ?? null) : null,
         obra_externa      ? 1 : 0,
         obra_interna      ? 1 : 0,
@@ -347,8 +366,24 @@ router.post('/', requireAuth, async (req, res) => {
       ]
     )
 
+    if (initial) {
+      for (const activity of initial.activities) {
+        await conn.query('INSERT INTO orden_servicio (id_orden, descripcion, precio, aplica_iva) VALUES (?, ?, ?, ?)',
+          [result.insertId, activity.descripcion, activity.precio, activity.aplica_iva])
+      }
+      await conn.query('UPDATE orden SET subtotal=?, iva=?, costo_total=?, monto_cliente=?, monto_seguro=0 WHERE id=?',
+        [initial.subtotal, initial.iva, initial.total, initial.total, result.insertId])
+    }
+
+    if (initial && req.body.detalle_particular) {
+      await conn.query('INSERT INTO orden_particular_documento (id_orden,detalle,observaciones) VALUES (?,?,?)',
+        [result.insertId, JSON.stringify({ detalles: initial.detalles, mano_obra_global: initial.mano_obra_global }), initial.observaciones])
+      // The agreed concepts already include materials and parts; consumption only changes stock/cost.
+      await conn.query('UPDATE orden SET cargos_desde_proforma=TRUE WHERE id=?', [result.insertId])
+    }
+
     // ── devolver la orden recién creada con datos del vehículo ────────────
-    const [nueva] = await pool.query(
+    const [nueva] = await conn.query(
       `SELECT
          o.*,
          v.matricula, v.marca, v.modelo, v.anio_fabricacion,
@@ -361,8 +396,8 @@ router.post('/', requireAuth, async (req, res) => {
     )
 
     // ── registrar en auditoría ────────────────────────────────────────────
-    try {
-      await pool.query(
+    {
+      await conn.query(
         `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, fecha_hora, detalle)
          VALUES (?, 'orden', ?, 'crear', NOW(), ?)`,
         [
@@ -371,15 +406,17 @@ router.post('/', requireAuth, async (req, res) => {
           `Orden ${tipo} creada para vehículo ${nueva[0].matricula}, tipo_pago: ${tipo_pago}`,
         ]
       )
-    } catch (audErr) {
-      // la auditoría no debe bloquear la respuesta
-      console.error('Error al registrar auditoría:', audErr)
     }
 
+    await conn.query('UPDATE orden_solicitud SET respuesta=? WHERE id_usuario=? AND solicitud=?', [JSON.stringify(nueva[0]), id_usuario, req.body.solicitud])
+    await conn.commit()
     res.status(201).json(nueva[0])
   } catch (err) {
+    if (conn) await conn.rollback()
     console.error('Error al crear orden:', err)
-    res.status(500).json({ message: 'Error interno del servidor.' })
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno del servidor.' })
+  } finally {
+    conn?.release()
   }
 })
 

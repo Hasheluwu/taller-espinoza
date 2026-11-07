@@ -18,4 +18,8 @@ function profit(order, costs, labor) {
   const total = costs ? cents(costs.materiales) + cents(costs.repuestos) + cents(costs.otros) + cents(labor) : null
   return { ingreso_sin_iva: revenue / 100, mano_obra: Number(labor), costos: costs, costo_total: total == null ? null : total / 100, ganancia: total == null ? null : (revenue - total) / 100 }
 }
-module.exports = { date, photo, profit }
+function appointmentReason(value) {
+  if (typeof value !== 'string' || !value.trim() || value.trim().length > 500 || /^(null|undefined)$/i.test(value.trim())) fail('Escribe el motivo de la cita (1 a 500 caracteres).')
+  return value.trim()
+}
+module.exports = { date, photo, profit, appointmentReason }

@@ -1,0 +1,28 @@
+const { test } = require('node:test')
+const assert = require('node:assert/strict')
+const r = require('../src/services/fieldRules')
+
+test('phones: 8 Nicaraguan digits, stored as 8888-1234', () => {
+  for (const [input, out] of [['88881234', '8888-1234'], ['8888 1234', '8888-1234'], ['+505 7777-0000', '7777-0000'], ['(505) 2222-3333', '2222-3333'], ['5555-1234', '5555-1234']]) assert.equal(r.phone(input), out)
+  for (const bad of ['1234567', '888812345', '9888-1234', '3888-1234', 'abc', '+1 555 123 4567']) assert.throws(() => r.phone(bad), /Teléfono/, bad)
+  assert.equal(r.phone('', { required: false }), '')
+  assert.throws(() => r.phone(''), /obligatorio/)
+})
+test('cédula: Nicaraguan format with a real birth date', () => {
+  assert.equal(r.cedula('0010101900001a'), '001-010190-0001A')
+  assert.equal(r.cedula('281-290204-1002B'), '281-290204-1002B')
+  for (const bad of ['001-TEST', '001-320190-0001A', '001-011390-0001A', '001-290201-0001A', '001-010190-0001', '001-010190-00011A', 'J0310000000001']) assert.throws(() => r.cedula(bad), /Cédula/, bad)
+})
+test('plates, claims, names, serials and references', () => {
+  assert.equal(r.plate('m 123 456'), 'M-123456'); assert.equal(r.plate('MT-12345'), 'MT-12345')
+  for (const bad of ['123456', 'ABCD-123', 'M-12', 'M-1234567']) assert.throws(() => r.plate(bad), /Matrícula/, bad)
+  assert.equal(r.claim('2026 001234'), '2026001234')
+  for (const bad of ['LAF-1234', '123', '1'.repeat(21)]) assert.throws(() => r.claim(bad), /trámite/, bad)
+  assert.equal(r.personName('  María   José  Pérez '), 'María José Pérez')
+  for (const bad of ['Al', 'Juan 2', '123', '-Ana']) assert.throws(() => r.personName(bad), /Nombre/, bad)
+  assert.equal(r.serial('jt2bf22k 1w0123456', { label: 'Chasis' }), 'JT2BF22K1W0123456')
+  assert.throws(() => r.serial('ab$', { label: 'Chasis' }), /Chasis/)
+  assert.equal(r.reference('r-00145'), 'R-00145')
+  assert.throws(() => r.reference('<script>'), /Referencia/)
+  assert.throws(() => r.reference('A'.repeat(31)), /30/)
+})

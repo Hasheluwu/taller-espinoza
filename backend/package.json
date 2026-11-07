@@ -5,7 +5,11 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node --test test/*.test.cjs"
+    "test": "node --test test/*.test.cjs",
+    "backup": "node scripts/backup.cjs create",
+    "backup:verify": "node scripts/backup.cjs verify",
+    "test:mysql": "node test/proformas-mysql.cjs",
+    "cambiar-password": "node scripts/cambiar-password.cjs"
   },
   "keywords": [],
   "author": "",
@@ -20,4 +24,3 @@
     "mysql2": "^3.23.3"
   }
 }
-

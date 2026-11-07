@@ -2,7 +2,7 @@ const express = require('express')
 const pool = require('../db')
 const auth = require('../middleware/authMiddleware')
 const { fail, number, money, lockOrder } = require('../services/validation')
-const { date, photo, profit } = require('../services/workshop')
+const { date, photo, profit, appointmentReason } = require('../services/workshop')
 const router = express.Router()
 router.use(auth)
 const run = action => async (req, res, next) => {
@@ -21,6 +21,16 @@ const audit = (conn, req, table, id, detail) => conn.query('INSERT INTO auditori
 const id = value => number(value, 'Identificador', { positive: true, integer: true })
 const text = (value, label) => { if (typeof value !== 'string' || !value.trim() || value.length > 500) fail(`${label}: escribe entre 1 y 500 caracteres.`); return value.trim() }
 
+router.get('/buscar', run(async (conn, req) => {
+  const q = String(req.query.q || '').trim().slice(0,100)
+  if (!q) return []
+  const [rows] = await conn.query(`SELECT o.id, o.estado, v.matricula, c.nombre AS nombre_cliente
+    FROM orden o JOIN vehiculo v ON v.id=o.id_vehiculo JOIN cliente c ON c.id=v.id_cliente
+    WHERE LOCATE(?,v.matricula)>0 OR LOCATE(?,c.nombre)>0 OR CAST(o.id AS CHAR)=?
+    ORDER BY o.id DESC LIMIT 20`,[q,q,q.replace(/^#/, '')])
+  return rows
+}))
+
 router.get('/vehiculos', run(async conn => {
   const [rows] = await conn.query('SELECT v.*, c.nombre AS cliente FROM vehiculo v JOIN cliente c ON c.id=v.id_cliente ORDER BY v.matricula')
   return rows
@@ -37,9 +47,12 @@ router.get('/vehiculos/:id/historial', run(async (conn, req) => {
 router.get('/agenda', run(async (conn, req) => {
   const from = date(req.query.desde), to = date(req.query.hasta)
   if (from > to) fail('Revisa el rango de fechas.')
-  const [citas] = await conn.query("SELECT c.*, DATE_FORMAT(c.inicio, '%Y-%m-%dT%H:%i') AS inicio, DATE_FORMAT(c.fin, '%Y-%m-%dT%H:%i') AS fin, v.matricula FROM cita c JOIN vehiculo v ON v.id=c.id_vehiculo WHERE c.inicio < DATE_ADD(?, INTERVAL 1 DAY) AND c.fin >= ? ORDER BY c.inicio", [to, from])
-  const [entregas] = await conn.query("SELECT o.id, o.fecha_entrega_estimada, o.estado, v.matricula FROM orden o JOIN vehiculo v ON v.id=o.id_vehiculo WHERE o.fecha_entrega_estimada BETWEEN ? AND ? AND o.estado NOT IN ('entregado','cancelado') ORDER BY o.fecha_entrega_estimada", [from, to])
-  return { citas, entregas }
+  const [citas] = await conn.query("SELECT c.*, DATE_FORMAT(c.inicio, '%Y-%m-%dT%H:%i') AS inicio, DATE_FORMAT(c.fin, '%Y-%m-%dT%H:%i') AS fin, v.matricula, v.marca, v.modelo, cl.nombre AS cliente FROM cita c JOIN vehiculo v ON v.id=c.id_vehiculo JOIN cliente cl ON cl.id=v.id_cliente WHERE c.inicio < DATE_ADD(?, INTERVAL 1 DAY) AND c.fin >= ? ORDER BY c.inicio", [to, from])
+  const delivery = "SELECT o.id, DATE_FORMAT(o.fecha_entrega_estimada,'%Y-%m-%d') AS fecha_entrega_estimada, o.estado, o.tipo, v.matricula, v.marca, v.modelo, cl.nombre AS cliente FROM orden o JOIN vehiculo v ON v.id=o.id_vehiculo JOIN cliente cl ON cl.id=v.id_cliente WHERE o.estado NOT IN ('entregado','cancelado') AND "
+  const [entregas] = await conn.query(`${delivery} o.fecha_entrega_estimada BETWEEN ? AND ? ORDER BY o.fecha_entrega_estimada`, [from, to])
+  // Promised deliveries already past due, whatever week is displayed.
+  const [atrasadas] = await conn.query(`${delivery} o.fecha_entrega_estimada < CURDATE() ORDER BY o.fecha_entrega_estimada`)
+  return { citas, entregas, atrasadas }
 }))
 router.post('/agenda', run(async (conn, req) => {
   const { inicio, fin, motivo, id_vehiculo } = req.body
@@ -52,7 +65,7 @@ router.post('/agenda', run(async (conn, req) => {
   if (!vehicle) fail('Vehículo no encontrado.',404)
   const [overlap] = await conn.query("SELECT id FROM cita WHERE id_vehiculo=? AND estado='programada' AND inicio < ? AND fin > ?", [vehicle.id, fin, inicio])
   if (overlap.length) fail('El vehículo ya tiene una cita en ese horario.',409)
-  const [result] = await conn.query('INSERT INTO cita (id_vehiculo,inicio,fin,motivo,creado_por) VALUES (?,?,?,?,?)', [vehicle.id,inicio,fin,text(motivo,'Motivo'),req.usuario.id])
+  const [result] = await conn.query('INSERT INTO cita (id_vehiculo,inicio,fin,motivo,creado_por) VALUES (?,?,?,?,?)', [vehicle.id,inicio,fin,appointmentReason(motivo),req.usuario.id])
   await audit(conn,req,'cita',result.insertId,'Cita programada')
   return { id: result.insertId }
 }))
@@ -69,6 +82,8 @@ router.put('/ordenes/:id/entrega', run(async (conn,req) => {
   const order = await lockOrder(conn,req.params.id)
   if (['entregado','cancelado'].includes(order.estado)) fail('La orden ya está cerrada.',409)
   const value = date(req.body.fecha)
+  const [[entry]] = await conn.query("SELECT DATE_FORMAT(fecha_ingreso, '%Y-%m-%d') AS dia FROM orden WHERE id=?", [order.id])
+  if (value < entry.dia) fail('La entrega no puede ser anterior al ingreso del vehículo.')
   await conn.query('UPDATE orden SET fecha_entrega_estimada=? WHERE id=?',[value,order.id])
   await audit(conn,req,'orden',order.id,`Entrega estimada: ${value}`)
   return { message:'Fecha de entrega actualizada.' }
@@ -97,7 +112,8 @@ router.get('/ordenes/:id/costos', run(async (conn,req) => {
   const order = await lockOrder(conn,req.params.id)
   const [[costs]] = await conn.query('SELECT * FROM costo_orden WHERE id_orden=?',[order.id])
   const [[labor]] = await conn.query('SELECT COALESCE(SUM(monto_acordado),0) AS total FROM orden_personal WHERE id_orden=?',[order.id])
-  return profit(order,costs || null,labor.total)
+  const invoice = await require('../services/insuranceInvoices').existing(conn,order.id)
+  return profit(invoice ? {...order,subtotal:invoice.documento.subtotal} : order,costs || null,labor.total)
 }))
 router.put('/ordenes/:id/costos', auth.admin, run(async (conn,req) => {
   const order = await lockOrder(conn,req.params.id)

@@ -1,3 +1,4 @@
+const forms = require('../services/formValidation')
 // backend/src/routes/vehiculos.js
 const express     = require('express')
 const pool        = require('../db')
@@ -53,7 +54,7 @@ router.get('/por-cliente/:id_cliente', requireAuth, async (req, res) => {
 })
 
 // POST /api/vehiculos
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, forms.middleware(forms.vehicle), async (req, res) => {
   const {
     id_cliente, matricula, marca, modelo,
     anio_fabricacion, aseguradora, color,
@@ -65,6 +66,8 @@ router.post('/', requireAuth, async (req, res) => {
   }
 
   try {
+    const [[owner]] = await pool.query('SELECT id FROM cliente WHERE id=?', [id_cliente])
+    if (!owner) return res.status(404).json({ message: 'El cliente seleccionado no existe.' })
     const [existe] = await pool.query(
       'SELECT id FROM vehiculo WHERE matricula = ? LIMIT 1',
       [matricula.trim()]
@@ -97,6 +100,7 @@ router.post('/', requireAuth, async (req, res) => {
 
     res.status(201).json(nuevo[0])
   } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'Ya existe un registro con esa cédula o matrícula.' })
     console.error('Error al crear vehículo:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
   }

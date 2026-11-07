@@ -1,8 +1,11 @@
+import WorkersPicker from '../components/WorkersPicker'
+import { emptyWorkerRow, workersPayload, ROLE_LABELS } from '../lib/workers'
+import { workshopApi } from '../lib/workshopApi'
 import { useDeferredLoad } from '../hooks/useDeferredLoad'
 import { apiFetch } from '../lib/api'
 // frontend/src/pages/Operaciones.jsx
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 const getToken = () => localStorage.getItem('token')
 const API = ''
@@ -84,7 +87,7 @@ function BtnEliminar({ estadoOrden, onClick, title }) {
 // ─── sección servicios ────────────────────────────────────────────────────────
 function SeccionServicios({ idOrden, estadoOrden, onOperacionHecha, onTotalesActualizados }) {
   const [servicios, setServicios] = useState([])
-  const [form, setForm]           = useState({ descripcion: '', precio: '', aplica_iva: true })
+  const [form, setForm]           = useState({ descripcion: '', precio: '', aplica_iva: true, tipo_linea: 'servicio' })
   const [creando, setCreando]     = useState(false)
   const [error, setError]         = useState('')
 
@@ -108,7 +111,7 @@ function SeccionServicios({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
       const data = await res.json()
       if (!res.ok) { setError(data.message); return }
       setServicios(prev => [...prev, data])
-      setForm({ descripcion: '', precio: '', aplica_iva: true })
+      setForm({ descripcion: '', precio: '', aplica_iva: true, tipo_linea: 'servicio' })
       onOperacionHecha()
     } catch { setError('Error de conexión.') }
     finally { setCreando(false) }
@@ -134,6 +137,7 @@ function SeccionServicios({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
       <div style={s.dosColumnas}>
         <div>
           <form onSubmit={handleSubmit} style={s.form}>
+            <label style={s.labelSmall}>Tipo de cargo<select value={form.tipo_linea} onChange={e=>setForm(p=>({...p,tipo_linea:e.target.value}))}><option value="servicio">Mano de obra</option><option value="repuesto">Repuesto</option><option value="material">Material</option></select></label>
             <Campo label="Descripción" required>
               <input type="text" value={form.descripcion}
                 onChange={e => setForm(p => ({ ...p, descripcion: e.target.value }))}
@@ -179,117 +183,136 @@ function SeccionServicios({ idOrden, estadoOrden, onOperacionHecha, onTotalesAct
   )
 }
 
-// ─── sección materiales + personal ───────────────────────────────────────────
-function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesActualizados }) {
-  const [materiales, setMateriales]       = useState([])
-  const [personal, setPersonal]           = useState([])
-  const [inventario, setInventario]       = useState([])
+// ─── sección equipo de la orden ──────────────────────────────────────────────
+// Workers of this order, each once, with the amount agreed. Only they can use its materials.
+function SeccionEquipo({ idOrden, estadoOrden, onEquipoCambio }) {
+  const [equipo, setEquipo]               = useState([])
   const [personalLista, setPersonalLista] = useState([])
-  const [formMat, setFormMat]             = useState({ id_material: '', cantidad_usada: '' })
-  const [formPers, setFormPers]           = useState({ id_personal: '', monto_acordado: '' })
-  const [formNuevoPers, setFormNuevoPers] = useState({ nombre: '', tipo: 'externo', rol: 'pintor', telefono: '', fijo: false })
-  const [mostrarNuevoPers, setMostrarNuevoPers] = useState(false)
+  const [workers, setWorkers]             = useState(() => [emptyWorkerRow()])
+  const [editando, setEditando]           = useState(null)
+  const [montoEdit, setMontoEdit]         = useState('')
   const [error, setError]                 = useState('')
+  const [mensaje, setMensaje]             = useState('')
   const [creando, setCreando]             = useState(false)
+  const editable = ESTADOS_EDITABLES.includes(estadoOrden)
 
-  const cargarTodo = useCallback(async () => {
+  const cargar = useCallback(async () => {
     try {
-    const headers = { Authorization: `Bearer ${getToken()}` }
-    const [rMat, rPers, rInv, rPersL] = await Promise.all([
-      apiFetch(`${API}/api/operaciones/${idOrden}/materiales`, { headers }),
-      apiFetch(`${API}/api/operaciones/${idOrden}/personal`, { headers }),
-      apiFetch(`${API}/api/operaciones/inventario/lista`, { headers }),
-      apiFetch(`${API}/api/operaciones/personal/lista`, { headers }),
-    ])
-    if (rMat.ok)   setMateriales(await rMat.json())
-    if (rPers.ok)  setPersonal(await rPers.json())
-    if (rInv.ok)   setInventario(await rInv.json())
-    if (rPersL.ok) setPersonalLista(await rPersL.json())
+      const [team, lista] = await Promise.all([workshopApi(`/api/operaciones/${idOrden}/personal`), workshopApi('/api/operaciones/personal/lista')])
+      setEquipo(team); setPersonalLista(lista)
     } catch (err) { setError(err.message) }
   }, [idOrden])
-  useDeferredLoad(cargarTodo)
+  useDeferredLoad(cargar)
 
-  async function handleSubmitMat(e) {
-    e.preventDefault(); setError(''); setCreando(true)
-    try {
-      const resMat = await apiFetch('/api/operaciones/' + idOrden + '/materiales', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
-        body: JSON.stringify({ ...formMat, ...(formPers.id_personal ? { id_personal: formPers.id_personal } : {}), ...(formPers.monto_acordado !== '' ? { monto_acordado: formPers.monto_acordado } : {}) }),
-      })
-      const dataMat = await resMat.json()
-      if (!resMat.ok) throw new Error(dataMat.message)
-      await cargarTodo()
-      setFormMat({ id_material: '', cantidad_usada: '' })
-      setFormPers({ id_personal: '', monto_acordado: '' })
-      onOperacionHecha()
-    } catch (err) { setError(err.message) }
+  async function ejecutar(accion, ok) {
+    if (creando) return
+    setCreando(true); setError(''); setMensaje('')
+    try { await accion(); await cargar(); onEquipoCambio(); setMensaje(ok) }
+    catch (err) { setError(err.message) }
     finally { setCreando(false) }
   }
-
-  async function handleCrearPersonal(e) {
-    e.preventDefault()
-    const res  = await apiFetch(`${API}/api/operaciones/personal`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-      body: JSON.stringify(formNuevoPers),
-    })
-    const data = await res.json()
-    if (res.ok) {
-      setPersonalLista(prev => [data, ...prev])
-      setFormPers(p => ({ ...p, id_personal: data.id }))
-      setMostrarNuevoPers(false)
-      setFormNuevoPers({ nombre: '', tipo: 'externo', rol: 'pintor', telefono: '', fijo: false })
-    }
+  const agregar = () => ejecutar(async () => {
+    const trabajadores = workersPayload(workers, { requireAmount: true })
+    if (!trabajadores.length) throw new Error('Elige al menos un trabajador y su monto acordado.')
+    await workshopApi(`/api/operaciones/${idOrden}/personal`, 'POST', { trabajadores })
+    setWorkers([emptyWorkerRow()])
+  }, 'Equipo actualizado.')
+  const guardarMonto = id => ejecutar(async () => {
+    await workshopApi(`/api/operaciones/personal-asignado/${id}`, 'PUT', { monto_acordado: montoEdit })
+    setEditando(null)
+  }, 'Monto actualizado.')
+  const quitar = miembro => {
+    if (!window.confirm(`¿Quitar a ${miembro.nombre_personal} del equipo de esta orden?`)) return
+    ejecutar(() => workshopApi(`/api/operaciones/personal-asignado/${miembro.id}`, 'DELETE'), `${miembro.nombre_personal} salió del equipo.`)
   }
 
-  async function handleEliminarMat(id) {
-    setError('')
-    const res = await apiFetch(`${API}/api/operaciones/materiales/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-    if (res.ok) {
-      setMateriales(prev => prev.filter(m => m.id !== id))
-      onTotalesActualizados()
-    } else {
-      const data = await res.json()
-      setError(data.message || 'No se pudo eliminar el material.')
-    }
-  }
-
-  async function handleEliminarPers(id) {
-    setError('')
-    const res = await apiFetch(`${API}/api/operaciones/personal-asignado/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-    if (res.ok) {
-      setPersonal(prev => prev.filter(p => p.id !== id))
-    } else {
-      const data = await res.json()
-      setError(data.message || 'No se pudo eliminar el personal.')
-    }
-  }
-
-  const fijos = personalLista.filter(p => p.fijo)
-  const otros  = personalLista.filter(p => !p.fijo)
-
-  async function guardarManoObra() {
-    if (creando) return
-    setCreando(true); setError('')
-    try {
-      const res = await apiFetch(`/api/operaciones/${idOrden}/personal`, { method: 'POST', headers: { 'Content-Type':'application/json', Authorization:`Bearer ${getToken()}` }, body: JSON.stringify(formPers) })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.message)
-      setFormPers({ id_personal:'', monto_acordado:'' })
-      await cargarTodo()
-    } catch (err) { setError(err.message) } finally { setCreando(false) }
-  }
+  const enEquipo = equipo.filter(m => !Number(m.liquidado)).map(m => m.id_personal)
+  const total = equipo.reduce((sum, m) => sum + Number(m.monto_acordado || 0), 0)
 
   return (
     <div style={s.seccionInterna}>
       <div style={s.dosColumnas}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <p style={s.seccionSubtitulo}>Agregar al equipo</p>
+          {editable ? <>
+            <WorkersPicker personalLista={personalLista} blocked={enEquipo} onWorkerCreated={w => setPersonalLista(prev => [w, ...prev])} rows={workers} setRows={setWorkers}
+              amountHint="Elige quiénes trabajan en esta orden y cuánto se acordó con cada uno (puedes poner 0 y editarlo después). Solo ellos podrán usar materiales del inventario para esta orden."/>
+            {error && <p style={s.err}>{error}</p>}
+            {mensaje && <p className="team-ok" role="status">{mensaje}</p>}
+            <button type="button" onClick={agregar} disabled={creando || !workers.some(w => w.id_personal)} style={creando ? s.btnDisabled : s.btnPrimary}>
+              {creando ? 'Guardando...' : 'Agregar al equipo'}
+            </button>
+          </> : <p style={s.vacio}>La orden está {String(estadoOrden).replaceAll('_', ' ')}: su equipo ya no se puede cambiar.</p>}
+        </div>
+
+        <div>
+          <p style={s.seccionSubtitulo}>Equipo de esta orden</p>
+          {equipo.length === 0
+            ? <p className="team-empty">Sin trabajadores asignados. Agrega al equipo antes de usar materiales del inventario.</p>
+            : <ul className="team-list">{equipo.map(m => <li key={m.id}>
+              <div className="team-main"><strong>{m.nombre_personal}</strong><span>{ROLE_LABELS[m.rol] || m.rol}{Number(m.liquidado) ? ' · Liquidado' : ''}</span></div>
+              {editando === m.id
+                ? <div className="team-edit"><input type="number" min="0" step="0.01" value={montoEdit} onChange={e => setMontoEdit(e.target.value)} aria-label={`Monto acordado con ${m.nombre_personal}`} autoFocus/><button type="button" onClick={() => guardarMonto(m.id)} disabled={creando || montoEdit === ''}>Guardar</button><button type="button" onClick={() => setEditando(null)}>Cancelar</button></div>
+                : <div className="team-amount"><b>C$ {fmt(m.monto_acordado)}</b>{editable && !Number(m.liquidado) && <>
+                    <button type="button" className="team-link" onClick={() => { setEditando(m.id); setMontoEdit(String(m.monto_acordado)) }}>Editar monto</button>
+                    <button type="button" className="team-link team-remove" onClick={() => quitar(m)}>Quitar</button>
+                  </>}</div>}
+            </li>)}</ul>}
+          {equipo.length > 0 && <p className="team-total">Mano de obra acordada: <b>C$ {fmt(total)}</b></p>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── sección materiales ──────────────────────────────────────────────────────
+function SeccionMateriales({ idOrden, estadoOrden, equipoVersion, onAbrirEquipo, onOperacionHecha, onTotalesActualizados }) {
+  const [materiales, setMateriales]       = useState([])
+  const [equipo, setEquipo]               = useState([])
+  const [inventario, setInventario]       = useState([])
+  const [formMat, setFormMat]             = useState({ id_material: '', cantidad_usada: '', id_personal: '', nota: '' })
+  const [error, setError]                 = useState('')
+  const [creando, setCreando]             = useState(false)
+
+  const cargarTodo = useCallback(async () => {
+    try {
+      const [mats, team, inv] = await Promise.all([
+        workshopApi(`/api/operaciones/${idOrden}/materiales`),
+        workshopApi(`/api/operaciones/${idOrden}/personal`),
+        workshopApi('/api/operaciones/inventario/lista'),
+      ])
+      setMateriales(mats); setInventario(inv)
+      setEquipo([...new Map(team.map(m => [m.id_personal, m])).values()])
+    } catch (err) { setError(err.message) }
+  }, [idOrden, equipoVersion]) // eslint-disable-line react-hooks/exhaustive-deps
+  useDeferredLoad(cargarTodo)
+
+  async function handleSubmitMat(e) {
+    e.preventDefault(); setError(''); setCreando(true)
+    try {
+      await workshopApi(`/api/operaciones/${idOrden}/materiales`, 'POST', formMat)
+      await cargarTodo()
+      setFormMat({ id_material: '', cantidad_usada: '', id_personal: '', nota: '' })
+      onOperacionHecha()
+    } catch (err) { setError(err.message) }
+    finally { setCreando(false) }
+  }
+
+  async function handleEliminarMat(id) {
+    setError('')
+    try {
+      await workshopApi(`/api/operaciones/materiales/${id}`, 'DELETE')
+      setMateriales(prev => prev.filter(m => m.id !== id))
+      onTotalesActualizados()
+    } catch (err) { setError(err.message || 'No se pudo eliminar el material.') }
+  }
+
+  return (
+    <div style={s.seccionInterna}>
+      <div style={s.dosColumnas}>
+        <form onSubmit={handleSubmitMat} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <p style={s.seccionSubtitulo}>Material</p>
+          {equipo.length === 0 && <div className="team-warning" role="alert"><p>Esta orden no tiene equipo. Solo los trabajadores asignados pueden usar materiales.</p><button type="button" onClick={onAbrirEquipo}>Asignar equipo →</button></div>}
           <Campo label="Material" required>
             <select value={formMat.id_material}
               onChange={e => setFormMat(p => ({ ...p, id_material: e.target.value }))} style={s.input} required>
@@ -306,156 +329,55 @@ function SeccionMateriales({ idOrden, estadoOrden, onOperacionHecha, onTotalesAc
               onFocus={e => Object.assign(e.target.style, s.inputFocus)}
               onBlur={e  => Object.assign(e.target.style, s.input)} />
           </Campo>
-
-          <p style={s.seccionSubtitulo}>Personal (opcional para el consumo)</p>
-          <p style={s.vacio}>Puedes registrar solo mano de obra o añadirla junto al consumo. Deja el monto vacío si ya fue acordado y registrado.</p>
-          {fijos.length > 0 && (
-            <div style={s.fijosRow}>
-              {fijos.map(p => (
-                <button key={p.id} type="button"
-                  onClick={() => setFormPers(prev => ({ ...prev, id_personal: p.id }))}
-                  style={formPers.id_personal == p.id ? s.fijoActivo : s.fijoBtn}>
-                  {p.nombre}
-                </button>
-              ))}
-            </div>
-          )}
-          <Campo label="Personal">
-            <select value={formPers.id_personal}
-              onChange={e => setFormPers(p => ({ ...p, id_personal: e.target.value }))} style={s.input}>
-              <option value="">Seleccioná personal...</option>
-              {fijos.length > 0 && <optgroup label="— Fijos —">{fijos.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.rol})</option>)}</optgroup>}
-              {otros.length > 0  && <optgroup label="— Otros —">{otros.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.rol})</option>)}</optgroup>}
+          <Campo label="Trabajador del equipo que lo usa" required>
+            <select value={formMat.id_personal} onChange={e => setFormMat(p => ({ ...p, id_personal: e.target.value }))} style={s.input} required disabled={!equipo.length}>
+              <option value="">{equipo.length ? 'Seleccioná trabajador...' : 'Primero asigna el equipo'}</option>
+              {equipo.map(m => <option key={m.id_personal} value={m.id_personal}>{m.nombre_personal} ({ROLE_LABELS[m.rol] || m.rol})</option>)}
             </select>
           </Campo>
-          <Campo label="Monto acordado (C$)" required>
-            <input type="number" min="0" step="0.01" value={formPers.monto_acordado}
-              onChange={e => setFormPers(p => ({ ...p, monto_acordado: e.target.value }))}
-              placeholder="Ej: 800.00" style={s.input}
-              onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-              onBlur={e  => Object.assign(e.target.style, s.input)} />
+          <Campo label="Trabajo o nota · opcional">
+            <input maxLength={500} value={formMat.nota} onChange={e => setFormMat(p => ({ ...p, nota: e.target.value }))} placeholder="Ej: Pintura de puerta trasera" style={s.input}/>
           </Campo>
-
-          <button type="button" onClick={() => setMostrarNuevoPers(v => !v)} style={s.btnGhost}>
-            {mostrarNuevoPers ? '— Cancelar nuevo personal' : '+ Agregar nuevo personal'}
-          </button>
-
-          {mostrarNuevoPers && (
-            <form onSubmit={handleCrearPersonal} style={{ ...s.form, backgroundColor: 'var(--surface-raised)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-              <Campo label="Nombre" required>
-                <input type="text" value={formNuevoPers.nombre}
-                  onChange={e => setFormNuevoPers(p => ({ ...p, nombre: e.target.value }))}
-                  style={s.input} required
-                  onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                  onBlur={e  => Object.assign(e.target.style, s.input)} />
-              </Campo>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <Campo label="Tipo">
-                  <select value={formNuevoPers.tipo}
-                    onChange={e => setFormNuevoPers(p => ({ ...p, tipo: e.target.value }))} style={s.input}>
-                    <option value="externo">Externo</option>
-                    <option value="interno">Interno</option>
-                  </select>
-                </Campo>
-                <Campo label="Rol">
-                  <select value={formNuevoPers.rol}
-                    onChange={e => setFormNuevoPers(p => ({ ...p, rol: e.target.value }))} style={s.input}>
-                    <option value="pintor">Pintor</option>
-                    <option value="enderezador">Enderezador</option>
-                    <option value="mecanico">Mecánico</option>
-                    <option value="otro">Otro</option>
-                  </select>
-                </Campo>
-              </div>
-              <Campo label="Teléfono (opcional)">
-                <input type="text" value={formNuevoPers.telefono}
-                  onChange={e => setFormNuevoPers(p => ({ ...p, telefono: e.target.value }))}
-                  style={s.input}
-                  onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                  onBlur={e  => Object.assign(e.target.style, s.input)} />
-              </Campo>
-              <label style={s.checkRow}>
-                <input type="checkbox" checked={formNuevoPers.fijo}
-                  onChange={e => setFormNuevoPers(p => ({ ...p, fijo: e.target.checked }))} style={s.chk} />
-                <span style={s.label}>Personal fijo (aparece siempre como opción rápida)</span>
-              </label>
-              <button type="submit" style={s.btnSecondary}>Crear personal</button>
-            </form>
-          )}
-
           {error && <p style={s.err}>{error}</p>}
-          <button onClick={handleSubmitMat} disabled={creando} style={creando ? s.btnDisabled : s.btnPrimary}>
+          <button type="submit" disabled={creando || !equipo.length} style={creando || !equipo.length ? s.btnDisabled : s.btnPrimary}>
             {creando ? 'Registrando...' : 'Registrar consumo'}
           </button>
-          <button type="button" onClick={guardarManoObra} disabled={creando || !formPers.id_personal || formPers.monto_acordado === ''} style={s.btnSecondary}>Guardar solo mano de obra</button>
-        </div>
+        </form>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div>
-            <p style={s.seccionSubtitulo}>Materiales registrados</p>
-            {materiales.length === 0
-              ? <p style={s.vacio}>Sin materiales.</p>
-              : materiales.map(m => (
-                <div key={m.id} style={s.filaItem}>
-                  <div style={s.filaItemMain}>
-                    <span style={s.itemDesc}>{m.nombre_material}</span>
-                    {m.responsable && <span style={s.itemMeta}>Usado por {m.responsable}{m.nota ? ` · ${m.nota}` : ''}</span>}
-                    <span style={s.itemVal}>×{m.cantidad_usada} {m.unidad_medida}</span>
-                    <span style={s.itemVal}>C$ {fmt(m.precio_unitario)}</span>
-                  </div>
-                  <BtnEliminar estadoOrden={estadoOrden} onClick={() => handleEliminarMat(m.id)} />
+        <div>
+          <p style={s.seccionSubtitulo}>Materiales registrados</p>
+          {materiales.length === 0
+            ? <p style={s.vacio}>Sin materiales.</p>
+            : materiales.map(m => (
+              <div key={m.id} style={s.filaItem}>
+                <div style={s.filaItemMain}>
+                  <span style={s.itemDesc}>{m.nombre_material}</span>
+                  {m.responsable && <span style={s.itemMeta}>Usado por {m.responsable}{m.nota ? ` · ${m.nota}` : ''}</span>}
+                  <span style={s.itemVal}>×{m.cantidad_usada} {m.unidad_medida}</span>
+                  <span style={s.itemVal}>C$ {fmt(m.precio_unitario)}</span>
                 </div>
-              ))
-            }
-          </div>
-          <div>
-            <p style={s.seccionSubtitulo}>Personal asignado</p>
-            {personal.length === 0
-              ? <p style={s.vacio}>Sin personal asignado.</p>
-              : personal.map(p => (
-                <div key={p.id} style={s.filaItem}>
-                  <div style={s.filaItemMain}>
-                    <span style={s.itemDesc}>{p.nombre_personal}</span>
-                    <span style={s.itemMeta}>{p.rol}</span>
-                    <span style={s.itemVal}>C$ {fmt(p.monto_acordado)}</span>
-                  </div>
-                  <BtnEliminar estadoOrden={estadoOrden} onClick={() => handleEliminarPers(p.id)} />
-                </div>
-              ))
-            }
-          </div>
+                <BtnEliminar estadoOrden={estadoOrden} onClick={() => handleEliminarMat(m.id)} />
+              </div>
+            ))
+          }
         </div>
       </div>
     </div>
   )
 }
 
-// ─── sección repuestos + personal ─────────────────────────────────────────────
+// ─── sección repuestos ───────────────────────────────────────────────────────
 function SeccionRepuestos({ idOrden, onOperacionHecha }) {
   const [repuestos, setRepuestos]         = useState([])
-  const [personal, setPersonal]           = useState([])
   const [lista, setLista]                 = useState([])
-  const [personalLista, setPersonalLista] = useState([])
   const [formRep, setFormRep]             = useState({ id_repuesto: '', cantidad_usada: '' })
-  const [formPers, setFormPers]           = useState({ id_personal: '', monto_acordado: '' })
-  const [formNuevoPers, setFormNuevoPers] = useState({ nombre: '', tipo: 'externo', rol: 'pintor', telefono: '', fijo: false })
-  const [mostrarNuevoPers, setMostrarNuevoPers] = useState(false)
   const [error, setError]                 = useState('')
   const [creando, setCreando]             = useState(false)
 
   const cargarTodo = useCallback(async () => {
     try {
-    const headers = { Authorization: `Bearer ${getToken()}` }
-    const [rRep, rPers, rLista, rPersL] = await Promise.all([
-      apiFetch(`${API}/api/operaciones/${idOrden}/repuestos`, { headers }),
-      apiFetch(`${API}/api/operaciones/${idOrden}/personal`, { headers }),
-      apiFetch(`${API}/api/operaciones/repuestos/lista`, { headers }),
-      apiFetch(`${API}/api/operaciones/personal/lista`, { headers }),
-    ])
-    if (rRep.ok)   setRepuestos(await rRep.json())
-    if (rPers.ok)  setPersonal(await rPers.json())
-    if (rLista.ok) setLista(await rLista.json())
-    if (rPersL.ok) setPersonalLista(await rPersL.json())
+      const [reps, disponibles] = await Promise.all([workshopApi(`/api/operaciones/${idOrden}/repuestos`), workshopApi('/api/operaciones/repuestos/lista')])
+      setRepuestos(reps); setLista(disponibles)
     } catch (err) { setError(err.message) }
   }, [idOrden])
   useDeferredLoad(cargarTodo)
@@ -463,60 +385,20 @@ function SeccionRepuestos({ idOrden, onOperacionHecha }) {
   async function handleSubmit(e) {
     e.preventDefault(); setError(''); setCreando(true)
     try {
-      if (!formPers.id_personal || !formPers.monto_acordado)
-        throw new Error('Debés asignar personal.')
-
-      // 1. Registrar repuesto
-      const resRep = await apiFetch(`${API}/api/operaciones/${idOrden}/repuestos`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify(formRep),
-      })
-      const dataRep = await resRep.json()
-      if (!resRep.ok) throw new Error(dataRep.message)
-
-      // 2. Registrar personal — si falla, informar (no hay DELETE de repuesto implementado aún)
-      const resPers = await apiFetch(`${API}/api/operaciones/${idOrden}/personal`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify(formPers),
-      })
-      const dataPers = await resPers.json()
-      if (!resPers.ok) {
-        // NOTA: DELETE de repuesto no está implementado en el backend todavía.
-        // El repuesto queda guardado pero el personal no. Reportar al usuario.
-        throw new Error(`El repuesto se guardó pero el personal falló. Eliminá el repuesto manualmente y volvé a intentarlo. Error: ${dataPers.message}`)
-      }
-
-      setRepuestos(prev => [...prev, dataRep])
-      setPersonal(prev => [...prev, dataPers])
+      await workshopApi(`/api/operaciones/${idOrden}/repuestos`, 'POST', formRep)
       setFormRep({ id_repuesto: '', cantidad_usada: '' })
-      setFormPers({ id_personal: '', monto_acordado: '' })
+      await cargarTodo()
       onOperacionHecha()
     } catch (err) { setError(err.message) }
     finally { setCreando(false) }
   }
 
-  async function handleCrearPersonal(e) {
-    e.preventDefault()
-    const res  = await apiFetch(`${API}/api/operaciones/personal`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-      body: JSON.stringify(formNuevoPers),
-    })
-    const data = await res.json()
-    if (res.ok) {
-      setPersonalLista(prev => [data, ...prev])
-      setFormPers(p => ({ ...p, id_personal: data.id }))
-      setMostrarNuevoPers(false)
-    }
-  }
-
-  const fijos = personalLista.filter(p => p.fijo)
-  const otros  = personalLista.filter(p => !p.fijo)
-
   return (
     <div style={s.seccionInterna}>
       <div style={s.dosColumnas}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <p style={s.seccionSubtitulo}>Repuesto</p>
+          <p style={s.vacio}>La mano de obra se acuerda en Equipo de la orden.</p>
           <Campo label="Repuesto" required>
             <select value={formRep.id_repuesto}
               onChange={e => setFormRep(p => ({ ...p, id_repuesto: e.target.value }))} style={s.input} required>
@@ -533,109 +415,27 @@ function SeccionRepuestos({ idOrden, onOperacionHecha }) {
               onFocus={e => Object.assign(e.target.style, s.inputFocus)}
               onBlur={e  => Object.assign(e.target.style, s.input)} />
           </Campo>
-
-          <p style={s.seccionSubtitulo}>Personal</p>
-          {fijos.length > 0 && (
-            <div style={s.fijosRow}>
-              {fijos.map(p => (
-                <button key={p.id} type="button"
-                  onClick={() => setFormPers(prev => ({ ...prev, id_personal: p.id }))}
-                  style={formPers.id_personal == p.id ? s.fijoActivo : s.fijoBtn}>
-                  {p.nombre}
-                </button>
-              ))}
-            </div>
-          )}
-          <Campo label="Personal">
-            <select value={formPers.id_personal}
-              onChange={e => setFormPers(p => ({ ...p, id_personal: e.target.value }))} style={s.input}>
-              <option value="">Seleccioná personal...</option>
-              {fijos.length > 0 && <optgroup label="— Fijos —">{fijos.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.rol})</option>)}</optgroup>}
-              {otros.length > 0  && <optgroup label="— Otros —">{otros.map(p => <option key={p.id} value={p.id}>{p.nombre} ({p.rol})</option>)}</optgroup>}
-            </select>
-          </Campo>
-          <Campo label="Monto acordado (C$)" required>
-            <input type="number" min="0" step="0.01" value={formPers.monto_acordado}
-              onChange={e => setFormPers(p => ({ ...p, monto_acordado: e.target.value }))}
-              placeholder="Ej: 500.00" style={s.input}
-              onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-              onBlur={e  => Object.assign(e.target.style, s.input)} />
-          </Campo>
-
-          <button type="button" onClick={() => setMostrarNuevoPers(v => !v)} style={s.btnGhost}>
-            {mostrarNuevoPers ? '— Cancelar nuevo personal' : '+ Agregar nuevo personal'}
-          </button>
-
-          {mostrarNuevoPers && (
-            <form onSubmit={handleCrearPersonal} style={{ ...s.form, backgroundColor: 'var(--surface-raised)', padding: '1rem', borderRadius: 'var(--radius-md)' }}>
-              <Campo label="Nombre" required>
-                <input type="text" value={formNuevoPers.nombre}
-                  onChange={e => setFormNuevoPers(p => ({ ...p, nombre: e.target.value }))}
-                  style={s.input} required
-                  onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                  onBlur={e  => Object.assign(e.target.style, s.input)} />
-              </Campo>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <Campo label="Tipo">
-                  <select value={formNuevoPers.tipo}
-                    onChange={e => setFormNuevoPers(p => ({ ...p, tipo: e.target.value }))} style={s.input}>
-                    <option value="externo">Externo</option>
-                    <option value="interno">Interno</option>
-                  </select>
-                </Campo>
-                <Campo label="Rol">
-                  <select value={formNuevoPers.rol}
-                    onChange={e => setFormNuevoPers(p => ({ ...p, rol: e.target.value }))} style={s.input}>
-                    <option value="pintor">Pintor</option>
-                    <option value="enderezador">Enderezador</option>
-                    <option value="mecanico">Mecánico</option>
-                    <option value="otro">Otro</option>
-                  </select>
-                </Campo>
-              </div>
-              <button type="submit" style={s.btnSecondary}>Crear personal</button>
-            </form>
-          )}
-
           {error && <p style={s.err}>{error}</p>}
-          <button onClick={handleSubmit} disabled={creando} style={creando ? s.btnDisabled : s.btnPrimary}>
-            {creando ? 'Registrando...' : 'Registrar repuesto + personal'}
+          <button type="submit" disabled={creando} style={creando ? s.btnDisabled : s.btnPrimary}>
+            {creando ? 'Registrando...' : 'Registrar repuesto'}
           </button>
-        </div>
+        </form>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div>
-            <p style={s.seccionSubtitulo}>Repuestos registrados</p>
-            {repuestos.length === 0
-              ? <p style={s.vacio}>Sin repuestos.</p>
-              : repuestos.map(r => (
-                <div key={r.id} style={s.filaItem}>
-                  <div style={s.filaItemMain}>
-                    <span style={s.itemDesc}>{r.nombre_repuesto}</span>
-                    <span style={s.itemMeta}>{r.marca} {r.modelo}</span>
-                    <span style={s.itemVal}>×{r.cantidad_usada}</span>
-                    <span style={s.itemVal}>C$ {fmt(r.precio_unitario)}</span>
-                  </div>
-                  {/* DELETE de repuestos pendiente de implementar en el backend */}
+        <div>
+          <p style={s.seccionSubtitulo}>Repuestos registrados</p>
+          {repuestos.length === 0
+            ? <p style={s.vacio}>Sin repuestos.</p>
+            : repuestos.map(r => (
+              <div key={r.id} style={s.filaItem}>
+                <div style={s.filaItemMain}>
+                  <span style={s.itemDesc}>{r.nombre_repuesto}</span>
+                  <span style={s.itemMeta}>{r.marca} {r.modelo}</span>
+                  <span style={s.itemVal}>×{r.cantidad_usada}</span>
+                  <span style={s.itemVal}>C$ {fmt(r.precio_unitario)}</span>
                 </div>
-              ))
-            }
-          </div>
-          <div>
-            <p style={s.seccionSubtitulo}>Personal asignado</p>
-            {personal.length === 0
-              ? <p style={s.vacio}>Sin personal.</p>
-              : personal.map(p => (
-                <div key={p.id} style={s.filaItem}>
-                  <div style={s.filaItemMain}>
-                    <span style={s.itemDesc}>{p.nombre_personal}</span>
-                    <span style={s.itemMeta}>{p.rol}</span>
-                    <span style={s.itemVal}>C$ {fmt(p.monto_acordado)}</span>
-                  </div>
-                </div>
-              ))
-            }
-          </div>
+              </div>
+            ))
+          }
         </div>
       </div>
     </div>
@@ -833,7 +633,9 @@ export default function Operaciones() {
   const [errorCarga, setErrorCarga] = useState('')
   const [totales, setTotales]            = useState(null)
   const [loading, setLoading]            = useState(true)
-  const [seccionAbierta, setSeccion]     = useState(null)
+  const [searchParams]                   = useSearchParams()
+  const [seccionAbierta, setSeccion]     = useState(() => searchParams.get('seccion'))
+  const [equipoVersion, setEquipoVersion] = useState(0)
   const [mostrarModalPago, setModalPago] = useState(false)
 
   useEffect(() => {
@@ -899,6 +701,21 @@ export default function Operaciones() {
         </div>
 
         <EncabezadoOrden orden={orden} />
+        {orden.detalle_particular?.observaciones && <section style={{ ...s.seccion, padding: '1.5rem' }}><h2 style={s.seccionTitulo}>Observaciones del trabajo particular</h2><p style={{ whiteSpace: 'pre-wrap' }}>{orden.detalle_particular.observaciones}</p></section>}
+
+        {!!orden?.cargos_desde_proforma && (
+          <div className="pf-info">
+            {orden.detalle_particular
+              ? 'Los trabajos y sus importes se registraron al crear este trabajo particular.'
+              : Number(orden.id_presupuesto) > 0
+                ? 'Los cargos aprobados se trasladaron desde la proforma.'
+                : 'Los trabajos y sus importes ya están incluidos en esta orden.'}
+            {' '}Materiales y repuestos registran el consumo sin volver a cobrarse. Para un cargo adicional usa «Servicios / Líneas de cobro».
+            {!orden.detalle_particular && Number.isSafeInteger(Number(orden.id_presupuesto)) && Number(orden.id_presupuesto) > 0 && (
+              <button className="pf-text-link" onClick={() => navigate(`/proformas/${orden.id_presupuesto}`)}>Ver proforma →</button>
+            )}
+          </div>
+        )}
         <button onClick={() => navigate(`/ordenes/${id}/expediente`)} style={s.btnSecondary}>Fotos, costos y entrega</button>
 
         {/* ── card de totales ── */}
@@ -933,16 +750,22 @@ export default function Operaciones() {
             />
           </Seccion>
 
-          <Seccion titulo="Materiales + Personal" abierta={seccionAbierta === 'materiales'} onToggle={() => toggle('materiales')}>
+          <Seccion titulo="Equipo de la orden" abierta={seccionAbierta === 'equipo'} onToggle={() => toggle('equipo')}>
+            <SeccionEquipo idOrden={id} estadoOrden={orden.estado} onEquipoCambio={() => setEquipoVersion(v => v + 1)} />
+          </Seccion>
+
+          <Seccion titulo="Materiales" abierta={seccionAbierta === 'materiales'} onToggle={() => toggle('materiales')}>
             <SeccionMateriales
               idOrden={id}
               estadoOrden={orden.estado}
+              equipoVersion={equipoVersion}
+              onAbrirEquipo={() => setSeccion('equipo')}
               onOperacionHecha={operacionHecha}
               onTotalesActualizados={actualizarTotales}
             />
           </Seccion>
 
-          <Seccion titulo="Repuestos + Personal" abierta={seccionAbierta === 'repuestos'} onToggle={() => toggle('repuestos')}>
+          <Seccion titulo="Repuestos" abierta={seccionAbierta === 'repuestos'} onToggle={() => toggle('repuestos')}>
             <SeccionRepuestos
               idOrden={id}
               estadoOrden={orden.estado}

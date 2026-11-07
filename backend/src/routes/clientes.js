@@ -1,3 +1,4 @@
+const forms = require('../services/formValidation')
 // backend/src/routes/clientes.js
 const express     = require('express')
 const pool        = require('../db')
@@ -14,7 +15,7 @@ router.get('/buscar', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
       'SELECT * FROM cliente WHERE cedula = ? LIMIT 1',
-      [cedula.trim()]
+      [(() => { try { return require('../services/fieldRules').cedula(cedula) } catch { return cedula.trim() } })()]
     )
     if (rows.length === 0)
       return res.status(404).json({ message: 'Cliente no encontrado.' })
@@ -71,7 +72,7 @@ router.get('/sugerir', requireAuth, async (req, res) => {
 })
 
 // ─── POST /api/clientes ───────────────────────────────────────────────────────
-router.post('/', requireAuth, async (req, res) => {
+router.post('/', requireAuth, forms.middleware(forms.client), async (req, res) => {
   const { nombre, cedula, telefono, fecha_nacimiento, municipio_residencia, direccion } = req.body
 
   if (!nombre || !cedula || !telefono || !municipio_residencia)
@@ -101,6 +102,7 @@ router.post('/', requireAuth, async (req, res) => {
     const [nuevo] = await pool.query('SELECT * FROM cliente WHERE id = ?', [result.insertId])
     res.status(201).json(nuevo[0])
   } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'Ya existe un registro con esa cédula o matrícula.' })
     console.error('Error al crear cliente:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
   }

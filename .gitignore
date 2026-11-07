@@ -3,3 +3,6 @@ backend/.env
 frontend/.env
 dist/
 .DS_Store
+.private-backups/
+artifacts/proformas/qa-database.json
+*.log

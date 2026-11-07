@@ -2,8 +2,12 @@ const express = require('express')
 const cors    = require('cors')
 require('dotenv').config()
 
+const { allowedOrigin, headers } = require('./middleware/security')
+
 const app = express()
-app.use(cors())
+app.disable('x-powered-by')
+app.use(headers)
+app.use(cors({ origin: (origin, done) => done(null, allowedOrigin(origin)) }))
 app.use(express.json({ limit: '5mb' }))
 app.use('/api/taller', require('./routes/taller'))
 app.use('/api/liquidaciones', require('./routes/liquidaciones'))
@@ -24,6 +28,8 @@ app.use('/api/vehiculos', vehiculosRoutes)
 
 const presupuestosRoutes = require('./routes/presupuestos')
 app.use('/api/presupuestos', presupuestosRoutes)
+app.use('/api/proformas', require('./routes/proformas'))
+app.use('/api/cotizaciones', require('./routes/proformas'))
 
 
 
@@ -36,10 +42,12 @@ const operacionesRoutes = require('./routes/operaciones')
 const pagosRoutes       = require('./routes/pagos')
 
 const ordenesRoutes = require('./routes/ordenes')
+app.use('/api/ordenes-borrador', require('./routes/ordenBorradores'))
 app.use('/api/ordenes', ordenesRoutes)
 
 app.use('/api/operaciones', operacionesRoutes)
 app.use('/api/pagos',       pagosRoutes)
+app.use('/api/facturas', require('./routes/facturas'))
 
 
 const dashboardRoutes = require('./routes/dashboard')
@@ -62,11 +70,27 @@ app.get('/api/ping', (req, res) => {
 app.use('/api', (req, res) => res.status(404).json({ message: 'Ruta no encontrada.' }))
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err)
+  if (err.type === 'entity.parse.failed') return res.status(400).json({ message: 'Los datos enviados no tienen un formato válido. Revisa el formulario.' })
   console.error(err)
   res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno del servidor.' })
 })
 
 const PORT = process.env.PORT || 3001
 require('./services/migrate')(require('./db'))
-  .then(() => app.listen(PORT, () => console.log(`Servidor corriendo en http://localhost:${PORT}`)))
-  .catch(err => { console.error('No se pudo preparar la base de datos:', err.message); process.exitCode = 1; require('./db').end() })
+  .then(() => app.listen(PORT, () => {
+    console.log(`Servidor corriendo en http://localhost:${PORT}`)
+    require('./services/securityCheck')(require('./db')).catch(err => console.warn('[SEGURIDAD] No se pudo revisar la configuración:', err.message))
+  }))
+  .catch(err => {
+    const causes = err.errors || [err]
+    const code = err.code || causes.find(cause => cause.code)?.code || 'ERROR_DB'
+    const guidance = {
+      ECONNREFUSED: 'MySQL no está disponible. Inicia el servicio de MySQL y verifica DB_HOST y DB_PORT en .env.',
+      ER_ACCESS_DENIED_ERROR: 'MySQL rechazó las credenciales. Revisa DB_USER y DB_PASSWORD en .env.',
+      ER_BAD_DB_ERROR: 'La base de datos configurada no existe. Revisa DB_NAME y la importación inicial.',
+      ETIMEDOUT: 'Se agotó el tiempo de conexión a MySQL. Revisa el servicio y la dirección configurada.',
+    }
+    console.error(`No se pudo preparar la base de datos [${code}]: ${guidance[code] || err.message || 'Error sin descripción. Revisa la conexión y las migraciones.'}`)
+    process.exitCode = 1
+    require('./db').end()
+  })

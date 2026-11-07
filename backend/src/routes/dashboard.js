@@ -20,11 +20,16 @@ router.get('/metricas', requireAuth, async (req, res) => {
       `SELECT COUNT(*) AS hoy FROM orden WHERE DATE(fecha_ingreso) = CURDATE()`
     )
     const [[{ cobros_pendientes }]] = await pool.query(
-      `SELECT COALESCE(SUM(ps.monto), 0) AS cobros_pendientes
-       FROM pago_seguro ps
-       WHERE ps.estado = 'pendiente'`
+      `SELECT COALESCE(SUM(saldo_inicial), 0) AS cobros_pendientes FROM factura_seguro WHERE estado='pendiente'`
     )
-    res.json({ activas, listas, hoy, cobros_pendientes })
+    const [[{ facturas_pendientes }]] = await pool.query(
+      `SELECT COUNT(*) AS facturas_pendientes FROM factura_seguro WHERE estado='pendiente'`
+    )
+    const [[{ sin_factura }]] = await pool.query(
+      `SELECT COUNT(*) AS sin_factura FROM orden o WHERE o.estado='entregado' AND o.tipo_pago IN ('lafise','iniser')
+       AND NOT EXISTS (SELECT 1 FROM factura_seguro f WHERE f.id_orden=o.id)`
+    )
+    res.json({ activas, listas, hoy, cobros_pendientes, facturas_pendientes, sin_factura })
   } catch (err) {
     console.error('Error en /dashboard/metricas:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
@@ -35,13 +40,17 @@ router.get('/metricas', requireAuth, async (req, res) => {
 // Conteo de órdenes agrupado por estado para el bloque visual de estado del taller.
 router.get('/breakdown-estados', requireAuth, async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT estado, COUNT(*) AS total FROM orden GROUP BY estado`
-    )
-    const resultado = {
-      recibido: 0, en_proceso: 0, listo: 0, entregado: 0, cancelado: 0,
+    const [rows] = await pool.query(`SELECT o.*,
+      (SELECT f.estado FROM factura_seguro f WHERE f.id_orden=o.id) estado_factura,
+      (SELECT COALESCE(SUM(monto),0) FROM pago_cliente WHERE id_orden=o.id) abonado_cliente,
+      (SELECT COALESCE(SUM(monto),0) FROM pago_seguro WHERE id_orden=o.id AND estado='recibido') abonado_seguro
+      FROM orden o`)
+    const resultado = {recibido:0,en_proceso:0,listo:0,entregado:0,pagado:0,cancelado:0}
+    for (const row of rows) {
+      const paid = row.estado_factura ? row.estado_factura==='pagada' : require('../services/billing').calculateSummary(row,[{monto:row.abonado_cliente}],[{monto:row.abonado_seguro,estado:'recibido'}]).pagado
+      const key = row.estado==='entregado' && paid ? 'pagado' : row.estado
+      resultado[key]=(resultado[key] || 0)+1
     }
-    rows.forEach(r => { resultado[r.estado] = r.total })
     res.json(resultado)
   } catch (err) {
     console.error('Error en /dashboard/breakdown-estados:', err)
@@ -82,18 +91,9 @@ router.get('/ordenes-recientes', requireAuth, async (req, res) => {
 router.get('/cobros-pendientes', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT
-         ps.id,
-         ps.monto,
-         ps.concepto,
-         ps.fecha_esperada,
-         o.tipo_pago,
-         v.matricula
-       FROM pago_seguro ps
-       JOIN orden    o ON o.id = ps.id_orden
-       JOIN vehiculo v ON v.id = o.id_vehiculo
-       WHERE ps.estado = 'pendiente'
-       ORDER BY ps.fecha_esperada ASC`
+      `SELECT f.id,f.id_orden,f.saldo_inicial AS monto,'factura_seguro' AS concepto,f.fecha_emision AS fecha_esperada,o.tipo_pago,v.matricula
+       FROM factura_seguro f JOIN orden o ON o.id=f.id_orden JOIN vehiculo v ON v.id=o.id_vehiculo
+       WHERE f.estado='pendiente' ORDER BY f.fecha_emision ASC`
     )
     res.json(rows)
   } catch (err) {

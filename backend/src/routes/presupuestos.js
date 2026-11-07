@@ -4,6 +4,8 @@ const pool        = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
 
 const router = express.Router()
+// The shared Proformas service owns all writes, totals and immutable issued copies.
+router.use((req, res, next) => req.method === 'GET' ? next() : res.status(409).json({ message: 'Gestiona este presupuesto desde Proformas. Actualiza la aplicación para usar el guardado completo.' }))
 router.use(require('../middleware/validateNumbers'))
 
 const IVA_RATE = 0.15 // IVA Nicaragua 15%

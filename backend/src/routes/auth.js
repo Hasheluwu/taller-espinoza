@@ -6,17 +6,20 @@ const bcrypt  = require('bcrypt')
 const jwt     = require('jsonwebtoken')
 const pool    = require('../db')
 
+const reserveAttempt = require('../services/loginAttempts')(pool)
 const router = express.Router()
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
-  const { email, password } = req.body
+  const { email: rawEmail, password } = req.body || {}
+  const email = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : rawEmail
 
-  if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
+  if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password || email.length > 254 || password.length > 1024) {
     return res.status(400).json({ message: 'Correo y contraseña son requeridos.' })
   }
 
   try {
+    const clearAttempts = await reserveAttempt(email, req.ip || req.socket?.remoteAddress || 'unknown')
     // Buscar usuario activo por email
     const [rows] = await pool.query(
       'SELECT * FROM usuario WHERE email = ? AND activo = 1 LIMIT 1',
@@ -48,6 +51,7 @@ router.post('/login', async (req, res) => {
     )
 
     await pool.query('INSERT INTO sesion_usuario (id, id_usuario, vence) VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR))', [sessionId, usuario.id])
+    await clearAttempts()
     res.json({
       token,
       usuario: {
@@ -58,6 +62,7 @@ router.post('/login', async (req, res) => {
       },
     })
   } catch (err) {
+    if (err.status === 429) return res.set('Retry-After', String(err.retryAfter)).status(429).json({ message: err.message, retry_after: err.retryAfter })
     console.error('Error en login:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
   }

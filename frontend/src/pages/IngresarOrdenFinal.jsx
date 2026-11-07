@@ -1,8 +1,13 @@
+import RuleInput from '../components/RuleInput'
+import PlaceCombobox from '../components/PlaceCombobox'
+import ParticularEditor from '../components/ParticularEditor'
 import { useDeferredLoad } from '../hooks/useDeferredLoad'
 import { apiFetch } from '../lib/api'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
+import { saveOrderDraft, deleteOrderDraft } from '../lib/orderDrafts'
 import { useNavigate, useLocation } from 'react-router-dom'
 import WizardSteps from '../components/WizardSteps'
+import { localDateTime } from '../lib/date'
 
 const getToken = () => localStorage.getItem('token')
 const API = ''
@@ -26,7 +31,7 @@ function BannerContexto({ cliente, vehiculo, presupuesto, onCambiarVehiculo }) {
           <div style={s.bannerSep} />
           <div style={s.bannerBloque}>
             <span style={s.bannerLabel}>Presupuesto</span>
-            <span style={s.bannerValor}>#{presupuesto.id}</span>
+            <span style={s.bannerValor}>N° {presupuesto.numero || presupuesto.id}</span>
             <span style={s.bannerSub}>C$ {Number(presupuesto.total).toLocaleString('es-NI', { minimumFractionDigits: 2 })}</span>
           </div>
         </>
@@ -36,32 +41,39 @@ function BannerContexto({ cliente, vehiculo, presupuesto, onCambiarVehiculo }) {
   )
 }
 
+const GUEST_RULES = { cliente: 'name', cedula: 'cedula', telefono: 'phone', placa: 'plate' }
+
 export default function IngresarOrdenFinal() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const cliente      = location.state?.cliente      ?? null
-  const vehiculo     = location.state?.vehiculo     ?? null
-  const presupuesto  = location.state?.presupuesto  ?? null
+  const presupuesto = location.state?.presupuesto ?? null
+  const automatic = location.state?.registrarDesdeCotizacion === true && presupuesto?.es_cotizacion
+  const [datosAlta,setDatosAlta] = useState(() => ({...presupuesto?.datos}))
+  const fields = [['cliente','Nombre del cliente',150],['cedula','Cédula',20],['telefono','Teléfono',20],['municipio_residencia','Departamento',100],['placa','Matrícula',20],['marca','Marca',50],['vehiculo','Modelo',50],['anio','Año de fabricación',4],['color','Color',50]]
+  const missing = fields.filter(([key]) => !String(presupuesto?.datos?.[key] ?? '').trim())
+  const cliente = useMemo(() => automatic ? {nombre:datosAlta.cliente,cedula:datosAlta.cedula} : location.state?.cliente ?? null, [automatic, datosAlta, location.state])
+  const vehiculo = useMemo(() => automatic ? {matricula:datosAlta.placa,marca:datosAlta.marca,modelo:datosAlta.vehiculo,anio_fabricacion:datosAlta.anio,aseguradora:presupuesto.seguro==='PARTICULAR'?'ninguna':presupuesto.seguro.toLowerCase()} : location.state?.vehiculo ?? null, [automatic, datosAlta, presupuesto, location.state])
   const origenId     = location.state?.origenId     ?? null   // viene de Operaciones → daño oculto particular
   const origenTipo   = location.state?.tipoDerivada ?? null   // 'dano_oculto' | 'garantia'
 
+  const particular = location.state?.particular === true
+
+  const draft = location.state?.borrador ?? (particular ? location.state?.borradorParticular ?? {} : {})
+
   // form fields
-  const [tipo, setTipo]                             = useState('pintura')
+  const [tipo, setTipo]                             = useState(draft.tipo ?? 'pintura')
   const [fechaIngreso, setFechaIngreso]             = useState(() => {
     const now = new Date()
-    return now.toISOString().slice(0, 16) // datetime-local format
+    return draft.fechaIngreso ?? localDateTime(now)
   })
-  const [fechaEntregaEst, setFechaEntregaEst]       = useState('')
-  const [tipoPago, setTipoPago]                     = useState(['lafise', 'iniser'].includes(vehiculo?.aseguradora) ? vehiculo.aseguradora : 'particular')
-  const [numeroTramite, setNumeroTramite]           = useState('')
-  const [numeroOrdenSeguro, setNumeroOrdenSeguro]   = useState('')
-  const [montoSeguro, setMontoSeguro]               = useState('')
-  const [montoCliente, setMontoCliente]             = useState('')
-  const [esGarantia, setEsGarantia]                 = useState(false)
-  const [fechaVencGarantia, setFechaVencGarantia]   = useState('')
-  const [obraExterna, setObraExterna]               = useState(false)
-  const [obraInterna, setObraInterna]               = useState(false)
+  const [fechaEntregaEst, setFechaEntregaEst]       = useState(draft.fechaEntregaEst ?? '')
+  const [tipoPago, setTipoPago]                     = useState(particular ? 'particular' : presupuesto?.seguro ? (presupuesto.seguro === 'PARTICULAR' ? 'particular' : presupuesto.seguro.toLowerCase()) : ['lafise', 'iniser'].includes(vehiculo?.aseguradora) ? vehiculo.aseguradora : 'particular')
+  const [numeroTramite, setNumeroTramite]           = useState(draft.numeroTramite || (presupuesto?.seguro === 'INISER' ? presupuesto?.reclamo : presupuesto?.tramite || presupuesto?.reclamo) || '')
+  const [esGarantia, setEsGarantia]                 = useState(draft.esGarantia ?? false)
+  const [fechaVencGarantia, setFechaVencGarantia]   = useState(draft.fechaVencGarantia ?? '')
+  const [obraExterna, setObraExterna]               = useState(draft.obraExterna ?? false)
+  const [obraInterna, setObraInterna]               = useState(draft.obraInterna ?? false)
 
   // orden derivada — se pre-llena si viene desde Operaciones (daño oculto particular)
   const [esDerivada, setEsDerivada]                 = useState(!!origenId)
@@ -73,12 +85,34 @@ export default function IngresarOrdenFinal() {
   )
   const [cargandoOrdenes, setCargandoOrdenes]       = useState(false)
 
+  const [solicitud] = useState(() => draft.solicitud ?? crypto.randomUUID())
+  const enviando = useRef(false)
+
   // submit
   const [creando, setCreando]   = useState(false)
   const [error, setError]       = useState('')
   const [ordenCreada, setOrdenCreada] = useState(null)
 
+  const [detalleParticular, setDetalleParticular] = useState(draft.detalleParticular ?? { mano_obra_global: 0, detalles: [{ tipo_linea: 'servicio', descripcion: '', cantidad: 1, precio_unitario: 0, aplica_iva: true }], observaciones: '' })
+  const [actividades, setActividades] = useState(draft.actividades ?? [{ descripcion: '', precio: '', aplica_iva: true }])
+  const pideActividades = tipoPago === 'particular' && !presupuesto?.version
+  const cambiarActividad = (index, campo, valor) => setActividades(items => items.map((item, i) => i === index ? { ...item, [campo]: valor } : item))
+  const subtotalActividades = actividades.reduce((sum, item) => sum + Math.round((Number(item.precio) || 0) * 100), 0)
+  const ivaActividades = actividades.reduce((sum, item) => sum + (item.aplica_iva ? Math.round(Math.round((Number(item.precio) || 0) * 100) * 15 / 100) : 0), 0)
+  const mostrarMonto = cents => `C$ ${(cents / 100).toLocaleString('es-NI', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
   const esSeguro = tipoPago === 'lafise' || tipoPago === 'iniser'
+
+  // Keep the unfinished registration as a draft (not for quote conversions or derived orders).
+  const guardaBorrador = !automatic && !origenId && !!cliente && !!vehiculo?.id
+  useEffect(() => {
+    if (!guardaBorrador || ordenCreada) return
+    const timer = setTimeout(() => saveOrderDraft({ particular, vehiculo, paso: 'orden', datos: {
+      cliente, vehiculo, id_presupuesto: presupuesto?.id ?? null,
+      form: { tipo, fechaIngreso, fechaEntregaEst, numeroTramite, esGarantia, fechaVencGarantia, obraExterna, obraInterna, detalleParticular, actividades, solicitud },
+    } }), 800)
+    return () => clearTimeout(timer)
+  }, [guardaBorrador, ordenCreada, particular, cliente, vehiculo, presupuesto, tipo, fechaIngreso, fechaEntregaEst, numeroTramite, esGarantia, fechaVencGarantia, obraExterna, obraInterna, detalleParticular, actividades, solicitud])
 
   // Cargar órdenes del mismo vehículo al activar "esta orden deriva de otra"
   const cargarOrigenes = useCallback(() => {
@@ -100,12 +134,21 @@ export default function IngresarOrdenFinal() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (enviando.current) return
     setError('')
+    if ((fechaEntregaEst && fechaEntregaEst < fechaIngreso.slice(0, 10)) || (esGarantia && fechaVencGarantia && fechaVencGarantia < fechaIngreso.slice(0, 10))) {
+      setError('La entrega y el vencimiento de garantía no pueden ser anteriores al ingreso del vehículo.')
+      return
+    }
+    if (pideActividades && !particular && actividades.some(item => !item.descripcion.trim() || item.precio === '' || !Number.isFinite(Number(item.precio)) || Number(item.precio) < 0)) {
+      setError('Completa la descripción y el precio de cada actividad.')
+      return
+    }
     setCreando(true)
 
     // validaciones básicas
     if (esSeguro && !numeroTramite.trim()) {
-      setError('El número de trámite es obligatorio para órdenes con seguro.')
+      setError(`El número de ${tipoPago === 'iniser' ? 'reclamo' : 'trámite'} es obligatorio para esta orden con seguro.`)
       setCreando(false)
       return
     }
@@ -118,6 +161,12 @@ export default function IngresarOrdenFinal() {
     // si es derivada por garantia → es_garantia = true
     // si es derivada por dano_oculto particular → danos_ocultos_inicial = true (se registra al crear)
     const payload = {
+      solicitud,
+      registrar_desde_cotizacion: automatic,
+      datos_alta: automatic ? datosAlta : undefined,
+      detalle_particular: particular ? detalleParticular : undefined,
+      actividades: pideActividades && !particular ? actividades : undefined,
+      version: presupuesto?.version,
       id_vehiculo:             vehiculo.id,
       id_presupuesto:          presupuesto?.id ?? null,
       id_orden_origen:         esDerivada ? idOrdenOrigen : null,
@@ -125,19 +174,19 @@ export default function IngresarOrdenFinal() {
       fecha_ingreso:           fechaIngreso,
       fecha_entrega_estimada:  fechaEntregaEst || null,
       tipo_pago:               tipoPago,
-      es_garantia:             esDerivada && tipoDerivada === 'garantia',
+      es_garantia:             esGarantia || (esDerivada && tipoDerivada === 'garantia'),
       fecha_vencimiento_garantia: esGarantia && fechaVencGarantia ? fechaVencGarantia : null,
       obra_externa:            obraExterna,
       obra_interna:            obraInterna,
       danos_ocultos_inicial:   esDerivada && tipoDerivada === 'dano_oculto',
       numero_tramite:          esSeguro ? numeroTramite.trim() : null,
-      numero_orden_seguro:     esSeguro ? numeroOrdenSeguro.trim() || null : null,
-      monto_seguro:            esSeguro && montoSeguro ? parseFloat(montoSeguro) : null,
-      monto_cliente:           esSeguro && montoCliente ? parseFloat(montoCliente) : null,
+      monto_seguro:            esSeguro && presupuesto?.total ? Number(presupuesto.total) : null,
+      monto_cliente:           esSeguro ? 0 : null,
     }
 
+    enviando.current = true
     try {
-      const res = await apiFetch(`${API}/api/ordenes`, {
+      const res = await apiFetch(presupuesto?.version ? `${API}/api/proformas/${presupuesto.id}/orden` : `${API}/api/ordenes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(payload),
@@ -145,9 +194,11 @@ export default function IngresarOrdenFinal() {
       const data = await res.json()
       if (!res.ok) { setError(data.message || 'Error al crear la orden.'); return }
       setOrdenCreada(data)
+      deleteOrderDraft({ particular, vehiculo }).catch(() => { /* The list hides drafts already turned into orders. */ })
     } catch {
       setError('No se pudo conectar con el servidor.')
     } finally {
+      enviando.current = false
       setCreando(false)
     }
   }
@@ -181,12 +232,19 @@ export default function IngresarOrdenFinal() {
             <p style={s.exitoMeta}>
               Tipo: {ordenCreada.tipo} · Pago: {ordenCreada.tipo_pago} · Estado: recibido
             </p>
+            <p style={s.exitoMeta}>Siguiente paso: asigna los trabajadores de esta orden. Solo ellos podrán usar materiales del inventario para ella.</p>
             <div style={s.exitoBtns}>
               <button
-                onClick={() => navigate(`/ordenes/${ordenCreada.id}/operaciones`)}
+                onClick={() => navigate(`/ordenes/${ordenCreada.id}/operaciones?seccion=equipo`)}
                 style={s.btnPrimary}
               >
-                Ir a Operaciones →
+                Asignar trabajadores →
+              </button>
+              <button
+                onClick={() => navigate(`/ordenes/${ordenCreada.id}/operaciones`)}
+                style={s.btnSecondary}
+              >
+                Ir a Operaciones
               </button>
               <button
                 onClick={() => navigate('/ordenes')}
@@ -201,17 +259,19 @@ export default function IngresarOrdenFinal() {
     )
   }
 
+  if (particular) return <ParticularEditor cliente={cliente} vehiculo={vehiculo} form={detalleParticular} setForm={setDetalleParticular} tipo={tipo} setTipo={setTipo} fecha={fechaIngreso} setFecha={setFechaIngreso} entrega={fechaEntregaEst} setEntrega={setFechaEntregaEst} busy={creando} error={error} onSubmit={handleSubmit} onBack={() => navigate('/ordenes/nueva/vehiculo', { state: { cliente, particular, borradorParticular: { solicitud, detalleParticular, tipo, fechaIngreso, fechaEntregaEst, esGarantia, fechaVencGarantia, obraExterna, obraInterna } } })} options={<details className="pf-panel"><summary>Opciones del trabajo</summary><div style={{ display: 'grid', gap: '1rem', marginTop: '1rem' }}><label><input type="checkbox" checked={obraExterna} onChange={e=>setObraExterna(e.target.checked)}/> Obra externa</label><label><input type="checkbox" checked={obraInterna} onChange={e=>setObraInterna(e.target.checked)}/> Obra interna</label><label><input type="checkbox" checked={esGarantia} onChange={e=>setEsGarantia(e.target.checked)}/> Incluye garantía</label>{esGarantia && <label className="pf-field"><span>Vencimiento de garantía</span><input type="date" min={fechaIngreso.slice(0, 10)} value={fechaVencGarantia} onChange={e=>setFechaVencGarantia(e.target.value)}/></label>}</div></details>}/>
+
   return (
     <div style={s.page}>
       <div style={s.container}>
 
-        <WizardSteps currentStep={4} />
+        {automatic ? <p className="section-kicker">COTIZACIÓN A ORDEN · CONFIRMAR INGRESO</p> : particular ? <p className="section-kicker">TRABAJO PARTICULAR · PASO 3 DE 3</p> : <WizardSteps currentStep={4} />}
 
         {/* encabezado */}
         <div style={s.header}>
-          <span style={s.eyebrow}>Ruta 1 — Paso 4 de 4</span>
-          <h1 style={s.titulo}>Ingresar <span style={s.accent}>Orden</span></h1>
-          <p style={s.subtitulo}>Datos de la orden</p>
+          {!automatic && <span style={s.eyebrow}>Ruta 1 — Paso 4 de 4</span>}
+          <h1 style={s.titulo}>{particular ? 'Registrar trabajo particular' : 'Ingresar orden'}</h1>
+          <p style={s.subtitulo}>{presupuesto?.version ? 'La proforma ya está aprobada. Ahora registrarás la reparación como una orden de trabajo.' : 'Registra la recepción del vehículo y los datos de la reparación.'}</p>{presupuesto?.version && <button type="button" style={s.btnSecondary} onClick={() => navigate(`${presupuesto.es_cotizacion ? '/cotizaciones' : '/proformas'}/${presupuesto.id}`)}>← Volver a la proforma sin crear una orden</button>}
         </div>
 
         {/* banner */}
@@ -219,10 +279,16 @@ export default function IngresarOrdenFinal() {
           cliente={cliente}
           vehiculo={vehiculo}
           presupuesto={presupuesto}
-          onCambiarVehiculo={() => navigate('/ordenes/nueva/vehiculo', { state: { cliente } })}
+          onCambiarVehiculo={() => automatic ? navigate(`/cotizaciones/${presupuesto.id}/editar`) : navigate('/ordenes/nueva/vehiculo', { state: { cliente, particular, presupuestoCotizacion: presupuesto?.es_cotizacion ? presupuesto : undefined } })}
         />
 
         <form onSubmit={handleSubmit} style={s.form}>
+          {automatic && <section style={{display:'grid',gap:'1rem'}}>
+            <h2>Datos recuperados de la cotización</h2>
+            <p>El cliente, vehículo, actividades y precios ya están completados. Al confirmar se registrarán automáticamente; si la cédula y matrícula ya existen, se reutilizarán sin duplicarlos ni modificar sus datos.</p>
+            {missing.length > 0 ? <><h3>Solo falta completar</h3><div style={s.filaGrid2}>{missing.map(([key,label,max])=><label key={key} style={s.field}><span style={s.label}>{label}</span>{key==='municipio_residencia' ? <PlaceCombobox required name={key} value={datosAlta[key] || ''} onChange={e=>setDatosAlta(old=>({...old,[key]:e.target.value}))} style={s.input}/> : GUEST_RULES[key] ? <RuleInput required rule={GUEST_RULES[key]} label={label} name={key} value={datosAlta[key] || ''} onChange={e=>setDatosAlta(old=>({...old,[key]:e.target.value}))} style={s.input}/> : <input required maxLength={max} value={datosAlta[key] || ''} onChange={e=>setDatosAlta(old=>({...old,[key]:e.target.value}))} style={s.input}/>}</label>)}</div></> : <p>No faltan datos del cliente o vehículo. Completa únicamente la recepción del trabajo.</p>}
+            <details><summary>Ver actividades y observaciones cotizadas</summary><ul>{presupuesto.detalles.map((item,i)=><li key={i}>{item.cantidad} × {item.descripcion}</li>)}</ul><p style={{whiteSpace:'pre-wrap'}}>{presupuesto.observaciones}</p><strong>Total acordado: C$ {Number(presupuesto.total).toFixed(2)}</strong></details>
+          </section>}
 
           {/* ── fila 1: tipo + fecha ingreso + fecha entrega ── */}
           <div style={s.filaGrid3}>
@@ -255,6 +321,7 @@ export default function IngresarOrdenFinal() {
               </label>
               <input
                 type="date"
+                min={fechaIngreso.slice(0, 10)}
                 value={fechaEntregaEst}
                 onChange={e => setFechaEntregaEst(e.target.value)}
                 style={s.input}
@@ -268,14 +335,14 @@ export default function IngresarOrdenFinal() {
           <div style={s.separador} />
           <div style={s.field}>
             <label style={s.label}><span style={s.accent}>Tipo de pago</span></label>
-            {vehiculo.aseguradora === 'ninguna' ? (
+            {presupuesto?.version ? <p>Pagador de la proforma: <strong>{presupuesto.seguro}</strong>. El total corresponde a un solo pagador.</p> : particular || vehiculo.aseguradora === 'ninguna' ? (
               <div style={s.radioGroup}>
                 <label style={s.radioBtnActivo}>
                   <input type="radio" name="tipo_pago" value="particular" checked readOnly style={{ display: 'none' }} />
                   PARTICULAR
                 </label>
                 <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)', alignSelf: 'center' }}>
-                  — vehículo sin aseguradora
+                  — el cliente paga directamente este trabajo
                 </span>
               </div>
             ) : (
@@ -303,71 +370,46 @@ export default function IngresarOrdenFinal() {
               <p style={s.bloqueSeguroTitulo}>Datos de seguro — {tipoPago.toUpperCase()}</p>
               <div style={s.filaGrid2}>
                 <div style={s.field}>
-                  <label style={s.label}><span style={s.accent}>Número de trámite</span></label>
-                  <input
-                    type="text"
-                    value={numeroTramite}
-                    onChange={e => setNumeroTramite(e.target.value)}
-                    placeholder="Ej: 423686"
-                    style={s.input}
-                    required={esSeguro}
-                    onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                    onBlur={e  => Object.assign(e.target.style, s.input)}
-                  />
+                  <label style={s.label}><span style={s.accent}>{tipoPago === 'iniser' ? 'Número de trámite / reclamo' : 'Número de trámite'}</span></label>
+                  <RuleInput rule="claim" label={tipoPago === 'iniser' ? 'Número de reclamo' : 'Número de trámite'}
+                    value={numeroTramite} onChange={e => setNumeroTramite(e.target.value)}
+                    placeholder="Ej: 423686" style={s.input} required={esSeguro} />
                 </div>
-                <div style={s.field}>
-                  <label style={s.label}>
-                    <span style={s.accent}>Número de orden del seguro</span>
-                    <span style={s.opcional}> — opcional</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={numeroOrdenSeguro}
-                    onChange={e => setNumeroOrdenSeguro(e.target.value)}
-                    placeholder="Ej: 400542"
-                    style={s.input}
-                    onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                    onBlur={e  => Object.assign(e.target.style, s.input)}
-                  />
-                </div>
+
               </div>
-              <div style={s.filaGrid2}>
-                <div style={s.field}>
-                  <label style={s.label}>
-                    <span style={s.accent}>Monto cubierto por seguro</span>
-                    <span style={s.opcional}> — opcional</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={montoSeguro}
-                    onChange={e => setMontoSeguro(e.target.value)}
-                    placeholder="C$ 0.00"
-                    style={s.input}
-                    onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                    onBlur={e  => Object.assign(e.target.style, s.input)}
-                  />
-                </div>
-                <div style={s.field}>
-                  <label style={s.label}>
-                    <span style={s.accent}>Monto adicional al cliente</span>
-                    <span style={s.opcional}> — opcional</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={montoCliente}
-                    onChange={e => setMontoCliente(e.target.value)}
-                    placeholder="C$ 0.00"
-                    style={s.input}
-                    onFocus={e => Object.assign(e.target.style, s.inputFocus)}
-                    onBlur={e  => Object.assign(e.target.style, s.input)}
-                  />
-                </div>
-              </div>
+              <p>El total de esta reparación se cobrará únicamente a {tipoPago.toUpperCase()}.{presupuesto?.total ? ` Total: C$ ${Number(presupuesto.total).toFixed(2)}.` : ' El importe se calculará con los trabajos registrados en Operaciones.'}</p>
             </div>
+          )}
+
+          {pideActividades && (
+            <section aria-labelledby="actividades-title" style={{ display: 'grid', gap: '1rem' }}>
+              <div style={s.separador} />
+              <h2 id="actividades-title" style={{ margin: 0, fontSize: 'var(--text-body-lg)' }}>Actividades para el vehículo</h2>
+              <p style={{ margin: 0, color: 'var(--text-tertiary)' }}>Describe cada trabajo y su precio antes de IVA. Quedarán registrados en Operaciones; los materiales y repuestos se agregan allí cuando se utilicen.</p>
+              {actividades.map((item, index) => (
+                <fieldset key={index} disabled={creando} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '1rem', minWidth: 0 }}>
+                  <legend style={s.label}>Actividad {index + 1}</legend>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'end' }}>
+                    <label style={{ ...s.field, flex: '3 1 240px' }}>
+                      <span style={s.label}>Trabajo a realizar</span>
+                      <textarea required maxLength={255} rows={2} value={item.descripcion} onChange={e => cambiarActividad(index, 'descripcion', e.target.value)} placeholder="Ej.: Enderezado y pintura del bumper delantero" style={{ ...s.input, resize: 'vertical' }} />
+                    </label>
+                    <label style={{ ...s.field, flex: '1 1 140px' }}>
+                      <span style={s.label}>Precio C$ · antes de IVA</span>
+                      <input required type="number" min="0" max="99999999.99" step="0.01" value={item.precio} onChange={e => cambiarActividad(index, 'precio', e.target.value)} placeholder="0.00" style={s.input} />
+                    </label>
+                    <label style={s.checkboxRow}><input type="checkbox" checked={item.aplica_iva} onChange={e => cambiarActividad(index, 'aplica_iva', e.target.checked)} /> IVA 15%</label>
+                    <button type="button" disabled={actividades.length === 1} aria-label={`Quitar actividad ${index + 1}`} style={s.btnSecondary} onClick={() => setActividades(items => items.filter((_, i) => i !== index))}>Quitar</button>
+                  </div>
+                </fieldset>
+              ))}
+              <button type="button" disabled={creando || actividades.length >= 100} style={{ ...s.btnSecondary, justifySelf: 'start' }} onClick={() => setActividades(items => [...items, { descripcion: '', precio: '', aplica_iva: true }])}>+ Agregar actividad</button>
+              <div style={{ background: 'var(--surface-raised)', padding: '1rem', borderRadius: 'var(--radius-md)', display: 'flex', flexWrap: 'wrap', gap: '1.5rem' }}>
+                <span>Subtotal: {mostrarMonto(subtotalActividades)}</span>
+                <span>IVA: {mostrarMonto(ivaActividades)}</span>
+                <strong style={s.accent}>Total del trabajo: {mostrarMonto(subtotalActividades + ivaActividades)}</strong>
+              </div>
+            </section>
           )}
 
           {/* ── obra externa / interna ── */}
@@ -425,7 +467,7 @@ export default function IngresarOrdenFinal() {
               </label>
               <input
                 type="date"
-                value={fechaVencGarantia}
+                min={fechaIngreso.slice(0, 10)} value={fechaVencGarantia}
                 onChange={e => setFechaVencGarantia(e.target.value)}
                 style={s.input}
                 onFocus={e => Object.assign(e.target.style, s.inputFocus)}
@@ -553,10 +595,10 @@ export default function IngresarOrdenFinal() {
           <div style={s.avanceRow}>
             <button
               type="button"
-              onClick={() => navigate('/ordenes/nueva/presupuesto', { state: { cliente, vehiculo } })}
+              onClick={() => automatic ? navigate(`/cotizaciones/${presupuesto.id}`) : navigate(particular || presupuesto?.es_cotizacion ? '/ordenes/nueva/vehiculo' : '/ordenes/nueva/presupuesto', { state: { cliente, vehiculo, particular, presupuestoCotizacion: presupuesto?.es_cotizacion ? presupuesto : undefined } })}
               style={s.btnSecondaryFull}
             >
-              ← Volver al paso 3
+              {automatic ? '← Volver a la cotización' : particular ? '← Volver al vehículo' : '← Volver al paso 3'}
             </button>
             <button
               type="submit"

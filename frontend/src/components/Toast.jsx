@@ -35,7 +35,9 @@ export function ToastProvider({ children }) {
       <div style={{
         position: 'fixed',
         bottom: '1.5rem',
-        right: '1.5rem',
+        right: '1rem',
+        left: 'auto',
+        maxWidth: 'calc(100vw - 2rem)',
         zIndex: 99999,
         display: 'flex',
         flexDirection: 'column-reverse',
@@ -48,8 +50,9 @@ export function ToastProvider({ children }) {
             <div
               key={t.id}
               className="animate-fade-in-up"
+              role={t.type === 'error' ? 'alert' : 'status'}
               style={{
-                background: `linear-gradient(135deg, ${s.bg}, rgba(17,24,39,0.95))`,
+                background: '#1c251d',
                 border: `1px solid ${s.border}`,
                 borderLeft: `4px solid ${s.border}`,
                 color: s.color,
@@ -58,10 +61,11 @@ export function ToastProvider({ children }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.6rem',
-                minWidth: '280px',
+                minWidth: '0',
+                width: 'min(380px, calc(100vw - 2rem))',
                 maxWidth: '420px',
-                backdropFilter: 'blur(16px)',
-                boxShadow: `0 8px 30px rgba(0,0,0,0.6), 0 0 20px ${s.glow}`,
+                
+                boxShadow: '0 8px 24px #0004',
                 fontFamily: "'SKModernist', sans-serif",
                 fontSize: '0.875rem',
                 fontWeight: '600',
@@ -70,7 +74,7 @@ export function ToastProvider({ children }) {
               }}
             >
               <span style={{ fontSize: '1.1rem', flexShrink: 0, fontWeight: '900' }}>{s.icon}</span>
-              <span style={{ flex: 1 }}>{t.message}</span>
+              <span style={{ flex: 1 }}>{t.message}</span><button aria-label="Cerrar notificación" onClick={() => setToasts(prev => prev.filter(item => item.id !== t.id))} style={{background: 'transparent', color: 'inherit', padding: '8px'}}>×</button>
             </div>
           )
         })}

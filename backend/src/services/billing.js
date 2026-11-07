@@ -3,8 +3,9 @@ const sum = rows => rows.reduce((total, p) => total + cents(p.monto), 0)
 function calculateSummary(order, client = [], insurance = []) {
   const total = order.costo_total == null ? null : cents(order.costo_total, 'Total de la orden')
   const insured = ['lafise', 'iniser'].includes(order.tipo_pago)
-  const clientDue = insured ? (order.monto_cliente == null ? null : cents(order.monto_cliente)) : total
-  const insuranceDue = insured ? (order.monto_seguro == null ? null : cents(order.monto_seguro)) : 0
+  const single = Number(order.pagador_unico) === 1
+  const clientDue = insured && single ? 0 : insured ? (order.monto_cliente == null ? null : cents(order.monto_cliente)) : total
+  const insuranceDue = insured && single ? total : insured ? (order.monto_seguro == null ? null : cents(order.monto_seguro)) : 0
   const configured = total !== null && total > 0 && clientDue !== null && insuranceDue !== null && clientDue + insuranceDue === total
   const clientPaid = sum(client)
   const insurancePaid = sum(insurance.filter(p => p.estado === 'recibido'))
@@ -14,6 +15,7 @@ function calculateSummary(order, client = [], insurance = []) {
   const paid = configured && remainingClient === 0 && remainingInsurance === 0
   const excess = configured ? Math.max(0, clientPaid - clientDue) + Math.max(0, insurancePaid - insuranceDue) : 0
   return {
+    pagador_unico: single,
     pagos_cliente: client, pagos_seguro: insurance,
     total_cliente: clientPaid / 100, total_seguro: (insurancePaid + insurancePending) / 100,
     seguro_recibido: insurancePaid / 100, seguro_pendiente: insurancePending / 100,
@@ -38,7 +40,19 @@ function calculateSummary(order, client = [], insurance = []) {
 async function summary(conn, order) {
   const [client] = await conn.query('SELECT * FROM pago_cliente WHERE id_orden = ? ORDER BY fecha ASC, id ASC', [order.id])
   const [insurance] = await conn.query('SELECT * FROM pago_seguro WHERE id_orden = ? ORDER BY id ASC', [order.id])
-  return calculateSummary(order, client, insurance)
+  const base = calculateSummary(order, client, insurance)
+  if (!['lafise','iniser'].includes(order.tipo_pago)) return base
+  const invoice = await require('./insuranceInvoices').existing(conn, order.id)
+  if (!invoice) return { ...base, puede_cobrar_cliente:false, puede_cobrar_seguro:false }
+  const total = Number(invoice.total), remaining = invoice.estado === 'pagada' ? 0 : Number(invoice.saldo_inicial)
+  return { ...base, factura_id:invoice.id, pagador_unico:true, configurado:true, total_orden:total,
+    monto_cliente:0, monto_seguro:total, saldo_cliente:0, saldo_seguro:remaining, saldo_total:remaining,
+    pagado:invoice.estado==='pagada', cliente_pagado:true, seguro_pagado:invoice.estado==='pagada',
+    aplicado_a_deuda:total-remaining, gran_total:Number(invoice.documento.credito_anterior)+Number(invoice.monto_recibido),
+    seguro_recibido:Number(invoice.documento.credito_seguro_anterior)+Number(invoice.monto_recibido),
+    seguro_pendiente:remaining, excedente:Number(invoice.documento.excedente_anterior),
+    puede_cobrar_cliente:false, puede_cobrar_seguro:false }
+
 }
 function validatePayment(order, balance, amount, payer) {
   const value = cents(amount, 'Monto', true)

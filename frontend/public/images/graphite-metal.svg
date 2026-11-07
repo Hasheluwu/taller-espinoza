@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <defs>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#182025"/>
+      <stop offset=".28" stop-color="#42494c"/>
+      <stop offset=".46" stop-color="#252c31"/>
+      <stop offset=".72" stop-color="#383e42"/>
+      <stop offset="1" stop-color="#161d23"/>
+    </linearGradient>
+    <filter id="grain">
+      <feTurbulence type="fractalNoise" baseFrequency=".025 .65" numOctaves="3" stitchTiles="stitch" seed="12"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".07"/></feComponentTransfer>
+      <feBlend in="SourceGraphic" mode="soft-light"/>
+    </filter>
+  </defs>
+  <path d="M0 0h800v800H0z" fill="url(#steel)" filter="url(#grain)"/>
+</svg>

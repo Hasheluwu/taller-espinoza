@@ -20,3 +20,9 @@ test('profit excludes sales tax, includes labor once and does not invent missing
  assert.equal(result.ganancia,10000)
  assert.equal(profit(order,{materiales:25000,repuestos:0,otros:0},5000).ganancia,-10000)
 })
+
+test('appointments reject missing reasons and legacy placeholder strings',()=>{
+ const {appointmentReason}=require('../src/services/workshop')
+ for(const value of [null,undefined,'','   ','null',' NULL ','undefined',{},'x'.repeat(501)])assert.throws(()=>appointmentReason(value),/motivo/)
+ assert.equal(appointmentReason('  Revisar frenos  '),'Revisar frenos')
+})

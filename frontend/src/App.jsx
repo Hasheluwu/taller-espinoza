@@ -1,3 +1,5 @@
+import Facturas from './pages/Facturas'
+import Particulares from './pages/Particulares'
 // frontend/src/App.jsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 
@@ -17,6 +19,8 @@ import Historial from './pages/Historial'
 import Agenda from './pages/Agenda'
 import Expediente from './pages/Expediente'
 import Liquidaciones from './pages/Liquidaciones'
+import Personal from './pages/Personal'
+import { ProformasList, ProformaEditor, ProformaDetail } from './pages/Proformas'
 
 // ─── ruta protegida ───────────────────────────────────────────────────────────
 function PrivateRoute({ children }) {
@@ -36,6 +40,17 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/facturas" element={<PrivateRoute><Facturas /></PrivateRoute>} />
+        <Route path="/particulares" element={<PrivateRoute><Particulares /></PrivateRoute>} />
+        <Route path="/cotizaciones" element={<PrivateRoute><ProformasList quotation /></PrivateRoute>} />
+        <Route path="/cotizaciones/nueva" element={<PrivateRoute><ProformaEditor quotation /></PrivateRoute>} />
+        <Route path="/cotizaciones/:id/editar" element={<PrivateRoute><ProformaEditor quotation /></PrivateRoute>} />
+        <Route path="/cotizaciones/:id" element={<PrivateRoute><ProformaDetail quotation /></PrivateRoute>} />
+        <Route path="/proformas" element={<PrivateRoute><ProformasList /></PrivateRoute>} />
+        <Route path="/proformas/nueva" element={<PrivateRoute><ProformaEditor /></PrivateRoute>} />
+        <Route path="/proformas/:id/editar" element={<PrivateRoute><ProformaEditor /></PrivateRoute>} />
+        <Route path="/proformas/:id" element={<PrivateRoute><ProformaDetail /></PrivateRoute>} />
+        <Route path="/personal" element={<PrivateRoute><Personal /></PrivateRoute>} />
         <Route path="/liquidaciones" element={<PrivateRoute><Liquidaciones /></PrivateRoute>} />
         <Route path="/historial" element={<PrivateRoute><Historial /></PrivateRoute>} />
         <Route path="/agenda" element={<PrivateRoute><Agenda /></PrivateRoute>} />

@@ -3,7 +3,8 @@ const express     = require('express')
 const pool        = require('../db')
 const requireAuth = require('../middleware/authMiddleware')
 
-const { lockOrder, fail, money } = require('../services/validation')
+const { lockOrder, fail, money, number } = require('../services/validation')
+const { validatePersonal, normalizeWorkers, assignWorkers, requireTeamMember } = require('../services/workers')
 const router = express.Router()
 router.use(require('../middleware/validateNumbers'))
 
@@ -20,7 +21,7 @@ const ESTADOS_EDITABLES = ['recibido', 'en_proceso']
 
 async function recalcularTotalesOrden(conn, id_orden) {
   const order = await lockOrder(conn, id_orden)
-  if (!ESTADOS_EDITABLES.includes(order.estado)) return { subtotal: order.subtotal, iva: order.iva, costo_total: order.costo_total }
+  if (order.factura_emitida || !ESTADOS_EDITABLES.includes(order.estado)) return { subtotal: order.subtotal, iva: order.iva, costo_total: order.costo_total }
   // servicios — precio con o sin IVA (15%)
   const [servicios] = await conn.query(
     `SELECT precio, aplica_iva FROM orden_servicio WHERE id_orden = ?`,
@@ -45,15 +46,17 @@ async function recalcularTotalesOrden(conn, id_orden) {
   for (const s of servicios) {
     const base = parseFloat(s.precio)
     subtotal += base
-    if (s.aplica_iva) iva += base * 0.15
+    if (s.aplica_iva) iva += Math.round(base * 15) / 100
   }
 
   for (const m of materiales) {
+    if (order.cargos_desde_proforma) continue
     subtotal += parseFloat(m.precio_unitario) * parseFloat(m.cantidad_usada)
     // materiales no generan IVA en la orden (ya se capturó en la compra)
   }
 
   for (const r of repuestos) {
+    if (order.cargos_desde_proforma) continue
     subtotal += parseFloat(r.precio_unitario) * parseInt(r.cantidad_usada)
   }
 
@@ -114,7 +117,8 @@ router.get('/:id_orden/servicios', requireAuth, async (req, res) => {
 
 // POST /api/operaciones/:id_orden/servicios
 router.post('/:id_orden/servicios', requireAuth, async (req, res) => {
-  const { descripcion, precio, aplica_iva } = req.body
+  const { descripcion, precio, aplica_iva, tipo_linea = 'servicio' } = req.body
+  if (!['servicio','repuesto','material'].includes(tipo_linea)) return res.status(400).json({message:'Tipo de cargo inválido.'})
   if (!descripcion || precio === undefined)
     return res.status(400).json({ message: 'Faltan campos obligatorios.' })
   const conn = await pool.getConnection()
@@ -122,8 +126,8 @@ router.post('/:id_orden/servicios', requireAuth, async (req, res) => {
     await conn.beginTransaction()
     if (req.params.id_orden) await lockOrder(conn, req.params.id_orden, !req.path.endsWith('/recalcular'))
     const [result] = await conn.query(
-      'INSERT INTO orden_servicio (id_orden, descripcion, precio, aplica_iva) VALUES (?, ?, ?, ?)',
-      [req.params.id_orden, descripcion.trim(), parseFloat(precio), aplica_iva ? 1 : 0]
+      'INSERT INTO orden_servicio (id_orden, descripcion, precio, aplica_iva, tipo_linea) VALUES (?, ?, ?, ?, ?)',
+      [req.params.id_orden, descripcion.trim(), parseFloat(precio), aplica_iva ? 1 : 0, tipo_linea]
     )
     const [nuevo] = await conn.query('SELECT * FROM orden_servicio WHERE id = ?', [result.insertId])
     await recalcularTotalesOrden(conn, req.params.id_orden)
@@ -185,11 +189,18 @@ router.delete('/servicios/:id', requireAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 
 // GET /api/operaciones/personal/lista — lista todo el personal, fijos primero
+// ?todos=1 also returns deactivated workers plus their work totals (staff management page).
 router.get('/personal/lista', requireAuth, async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      'SELECT * FROM personal ORDER BY fijo DESC, nombre ASC'
-    )
+    const all = req.query.todos === '1'
+    const [rows] = await pool.query(all
+      ? `SELECT p.*,
+           (SELECT COUNT(*) FROM orden_personal op WHERE op.id_personal=p.id) AS trabajos,
+           (SELECT COALESCE(SUM(op.monto_acordado),0) FROM orden_personal op WHERE op.id_personal=p.id) AS total_acordado,
+           (SELECT COALESCE(SUM(op.monto_acordado),0) FROM orden_personal op WHERE op.id_personal=p.id AND NOT EXISTS
+              (SELECT 1 FROM liquidacion_detalle ld JOIN liquidacion_personal lp ON lp.id=ld.id_liquidacion WHERE ld.id_orden_personal=op.id AND lp.pagado=TRUE)) AS pendiente
+         FROM personal p ORDER BY p.activo DESC, p.fijo DESC, p.nombre ASC`
+      : 'SELECT * FROM personal WHERE activo = 1 ORDER BY fijo DESC, nombre ASC')
     res.json(rows)
   } catch (err) {
     console.error(err)
@@ -199,13 +210,13 @@ router.get('/personal/lista', requireAuth, async (req, res) => {
 
 // POST /api/operaciones/personal — crear nuevo personal
 router.post('/personal', requireAuth, async (req, res) => {
-  const { nombre, tipo, rol, telefono, fijo } = req.body
-  if (!nombre || !tipo || !rol)
-    return res.status(400).json({ message: 'Faltan campos obligatorios.' })
   try {
+    const p = validatePersonal(req.body)
+    const [[same]] = await pool.query('SELECT id FROM personal WHERE LOWER(nombre)=LOWER(?) AND activo=1', [p.nombre])
+    if (same) fail('Ya existe un trabajador activo con ese nombre.', 409)
     const [result] = await pool.query(
       'INSERT INTO personal (nombre, tipo, rol, telefono, fijo) VALUES (?, ?, ?, ?, ?)',
-      [nombre.trim(), tipo, rol, telefono?.trim() || null, fijo ? 1 : 0]
+      [p.nombre, p.tipo, p.rol, p.telefono, p.fijo]
     )
     const [nuevo] = await pool.query('SELECT * FROM personal WHERE id = ?', [result.insertId])
     res.status(201).json(nuevo[0])
@@ -213,6 +224,34 @@ router.post('/personal', requireAuth, async (req, res) => {
     console.error(err)
     res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   }
+})
+
+// PUT /api/operaciones/personal/:id — edit a worker (administración)
+router.put('/personal/:id', requireAuth, requireAuth.admin, async (req, res, next) => {
+  try {
+    const id = number(req.params.id, 'Trabajador', { positive: true, integer: true })
+    const p = validatePersonal(req.body)
+    const [[same]] = await pool.query('SELECT id FROM personal WHERE LOWER(nombre)=LOWER(?) AND activo=1 AND id<>?', [p.nombre, id])
+    if (same) fail('Ya existe otro trabajador activo con ese nombre.', 409)
+    const [result] = await pool.query('UPDATE personal SET nombre=?, tipo=?, rol=?, telefono=?, fijo=? WHERE id=?', [p.nombre, p.tipo, p.rol, p.telefono, p.fijo, id])
+    if (!result.affectedRows) fail('Trabajador no encontrado.', 404)
+    await pool.query("INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle) VALUES (?, 'personal', ?, 'editar', ?)", [req.usuario.id, id, `Datos actualizados: ${p.nombre}, ${p.rol}, ${p.tipo}`])
+    const [[row]] = await pool.query('SELECT * FROM personal WHERE id=?', [id])
+    res.json(row)
+  } catch (err) { next(err) }
+})
+
+// PATCH /api/operaciones/personal/:id/activo — deactivate or reactivate (history is kept)
+router.patch('/personal/:id/activo', requireAuth, requireAuth.admin, async (req, res, next) => {
+  try {
+    const id = number(req.params.id, 'Trabajador', { positive: true, integer: true })
+    if (typeof req.body?.activo !== 'boolean') fail('Indica si el trabajador queda activo o de baja.')
+    const [result] = await pool.query('UPDATE personal SET activo=? WHERE id=?', [req.body.activo ? 1 : 0, id])
+    if (!result.affectedRows) fail('Trabajador no encontrado.', 404)
+    await pool.query("INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle) VALUES (?, 'personal', ?, 'editar', ?)", [req.usuario.id, id, req.body.activo ? 'Trabajador reactivado' : 'Trabajador dado de baja'])
+    const [[row]] = await pool.query('SELECT * FROM personal WHERE id=?', [id])
+    res.json(row)
+  } catch (err) { next(err) }
 })
 
 // ═══════════════════════════════════════════════════════════
@@ -223,7 +262,8 @@ router.post('/personal', requireAuth, async (req, res) => {
 router.get('/:id_orden/personal', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT op.*, p.nombre AS nombre_personal, p.rol, p.tipo
+      `SELECT op.*, p.nombre AS nombre_personal, p.rol, p.tipo, p.activo,
+         EXISTS (SELECT 1 FROM liquidacion_detalle ld WHERE ld.id_orden_personal = op.id) AS liquidado
        FROM orden_personal op
        JOIN personal p ON op.id_personal = p.id
        WHERE op.id_orden = ? ORDER BY op.id ASC`,
@@ -237,29 +277,51 @@ router.get('/:id_orden/personal', requireAuth, async (req, res) => {
 })
 
 // POST /api/operaciones/:id_orden/personal
+// Accepts one worker ({ id_personal, monto_acordado }) or several ({ trabajadores: [...] }), saved together.
 router.post('/:id_orden/personal', requireAuth, async (req, res) => {
-  const { id_personal, monto_acordado } = req.body
-  if (!id_personal || monto_acordado === undefined)
-    return res.status(400).json({ message: 'Faltan campos obligatorios.' })
   const conn = await pool.getConnection()
   try {
+    const workers = normalizeWorkers(req.body, { requireAmount: true })
+    if (!workers.length) fail('Elige al menos un trabajador y su monto acordado.')
     await conn.beginTransaction()
     await lockOrder(conn, req.params.id_orden, true)
-    const [result] = await conn.query(
-      'INSERT INTO orden_personal (id_orden, id_personal, monto_acordado) VALUES (?, ?, ?)',
-      [req.params.id_orden, id_personal, parseFloat(monto_acordado)]
-    )
-    const [nuevo] = await conn.query(
+    const ids = await assignWorkers(conn, req.params.id_orden, workers)
+    const [nuevos] = await conn.query(
       `SELECT op.*, p.nombre AS nombre_personal, p.rol, p.tipo
        FROM orden_personal op JOIN personal p ON op.id_personal = p.id
-       WHERE op.id = ?`,
-      [result.insertId]
+       WHERE op.id IN (?) ORDER BY op.id`,
+      [ids]
     )
     await conn.commit()
-    res.status(201).json(nuevo[0])
+    res.status(201).json(Array.isArray(req.body.trabajadores) ? nuevos : nuevos[0])
   } catch (err) {
     await conn.rollback()
     console.error(err)
+    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
+  } finally { conn.release() }
+})
+
+// PUT /api/operaciones/personal-asignado/:id — change the amount agreed with a team member
+router.put('/personal-asignado/:id', requireAuth, async (req, res) => {
+  const conn = await pool.getConnection()
+  try {
+    const id = number(req.params.id, 'Asignación', { positive: true, integer: true })
+    const amount = req.body?.monto_acordado
+    if (amount === undefined || amount === null || amount === '') fail('Escribe el monto acordado.')
+    await conn.beginTransaction()
+    const [[row]] = await conn.query('SELECT op.*, p.nombre FROM orden_personal op JOIN personal p ON p.id=op.id_personal WHERE op.id=?', [id])
+    if (!row) fail('Asignación de personal no encontrada.', 404)
+    await lockOrder(conn, row.id_orden, true)
+    const [settled] = await conn.query('SELECT id FROM liquidacion_detalle WHERE id_orden_personal=? FOR UPDATE', [id])
+    if (settled.length) fail(`El trabajo de ${row.nombre} ya está en una liquidación. Su monto no se puede cambiar.`, 409)
+    await conn.query('UPDATE orden_personal SET monto_acordado=? WHERE id=?', [Number(amount), id])
+    await conn.query("INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle) VALUES (?, 'orden_personal', ?, 'editar', ?)", [req.usuario.id, id, `Monto de ${row.nombre} en orden #${row.id_orden}: C$ ${row.monto_acordado} -> C$ ${Number(amount).toFixed(2)}`])
+    const [[updated]] = await conn.query('SELECT op.*, p.nombre AS nombre_personal, p.rol, p.tipo, 0 AS liquidado FROM orden_personal op JOIN personal p ON p.id=op.id_personal WHERE op.id=?', [id])
+    await conn.commit()
+    res.json(updated)
+  } catch (err) {
+    await conn.rollback()
+    if (!err.status) console.error(err)
     res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
   } finally { conn.release() }
 })
@@ -311,7 +373,7 @@ router.delete('/personal-asignado/:id', requireAuth, async (req, res) => {
 router.get('/inventario/lista', requireAuth, async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, nombre, precio_unidad, cantidad, unidad_medida FROM inventario WHERE cantidad > 0 ORDER BY nombre ASC'
+      'SELECT id, nombre, precio_unidad, cantidad, unidad_medida FROM inventario WHERE cantidad > 0 AND (fecha_expiracion IS NULL OR fecha_expiracion >= CURRENT_DATE()) ORDER BY nombre ASC'
     )
     res.json(rows)
   } catch (err) {
@@ -345,7 +407,7 @@ router.get('/:id_orden/materiales', requireAuth, async (req, res) => {
 
 // POST /api/operaciones/:id_orden/materiales
 router.post('/:id_orden/materiales', requireAuth, async (req, res) => {
-  const { id_material, cantidad_usada, id_personal, nota, monto_acordado } = req.body
+  const { id_material, cantidad_usada, nota } = req.body
   if (!id_material || !cantidad_usada)
     return res.status(400).json({ message: 'Faltan campos obligatorios.' })
 
@@ -356,16 +418,13 @@ router.post('/:id_orden/materiales', requireAuth, async (req, res) => {
 
     // verificar stock disponible
     money(cantidad_usada, 'Cantidad', true)
-    if (!id_personal && monto_acordado !== undefined && monto_acordado !== '') fail('Selecciona el trabajador para registrar su monto acordado.')
-    if (id_personal) {
-      const [[person]] = await conn.query('SELECT id FROM personal WHERE id=?', [id_personal])
-      if (!person) fail('Trabajador no encontrado.', 404)
-    }
+    const responsible = await requireTeamMember(conn, req.params.id_orden, req.body.id_personal ?? req.body.trabajadores?.[0]?.id_personal)
     const [inv] = await conn.query(
-      'SELECT cantidad, precio_unidad FROM inventario WHERE id = ? FOR UPDATE',
+      'SELECT cantidad, precio_unidad, (fecha_expiracion < CURRENT_DATE()) AS vencido FROM inventario WHERE id = ? FOR UPDATE',
       [id_material]
     )
     if (inv.length === 0) throw new Error('Material no encontrado.')
+    if (Number(inv[0].vencido) === 1) fail('Este material está vencido. No se permite su consumo.')
     if (parseFloat(inv[0].cantidad) < parseFloat(cantidad_usada))
       throw new Error(`Stock insuficiente. Disponible: ${inv[0].cantidad}`)
 
@@ -377,11 +436,8 @@ router.post('/:id_orden/materiales', requireAuth, async (req, res) => {
        VALUES (?, ?, ?, ?, ?)`,
       [req.params.id_orden, id_material, parseFloat(cantidad_usada), precio_unitario, req.usuario.id]
     )
-    if (id_personal) {
-      await conn.query('INSERT INTO consumo_responsable (id_material_orden,id_personal,nota) VALUES (?,?,?)', [result.insertId,id_personal,String(nota || '').slice(0,500)])
-      // Optional labor charge is part of the same transaction as the material.
-      if (monto_acordado !== undefined && monto_acordado !== '') await conn.query('INSERT INTO orden_personal (id_orden,id_personal,monto_acordado) VALUES (?,?,?)', [req.params.id_orden,id_personal,money(monto_acordado,'Monto acordado')])
-    }
+    // Labor is agreed in the order's team; a consumption only records who used the material.
+    await conn.query('INSERT INTO consumo_responsable (id_material_orden,id_personal,nota) VALUES (?,?,?)', [result.insertId,responsible,String(nota || '').slice(0,500)])
 
     // movimiento de salida
     await conn.query(
@@ -582,8 +638,11 @@ router.get('/:id_orden/danos', requireAuth, async (req, res) => {
 // POST /api/operaciones/:id_orden/danos
 router.post('/:id_orden/danos', requireAuth, async (req, res) => {
   const { descripcion, costo_adicional, aplica_seguro, monto_cubierto_seguro, monto_extra_cliente } = req.body
-  if (!descripcion || costo_adicional === undefined)
-    return res.status(400).json({ message: 'Faltan campos obligatorios.' })
+  if (typeof descripcion !== 'string' || !descripcion.trim() || costo_adicional === undefined || costo_adicional === '')
+    return res.status(400).json({ message: 'Escribe la descripción y el costo adicional del daño.' })
+  const optionalAmount = value => value === undefined || value === null || value === '' ? null : Number(value)
+  const covered = aplica_seguro ? optionalAmount(monto_cubierto_seguro) : null
+  const extra = optionalAmount(monto_extra_cliente)
 
   const conn = await pool.getConnection()
   try {
@@ -599,8 +658,8 @@ router.post('/:id_orden/danos', requireAuth, async (req, res) => {
         descripcion.trim(),
         parseFloat(costo_adicional),
         aplica_seguro ? 1 : 0,
-        monto_cubierto_seguro ? parseFloat(monto_cubierto_seguro) : null,
-        monto_extra_cliente   ? parseFloat(monto_extra_cliente)   : null,
+        covered,
+        extra,
       ]
     )
 
