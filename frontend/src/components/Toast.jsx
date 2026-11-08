@@ -67,13 +67,13 @@ export function ToastProvider({ children }) {
                 
                 boxShadow: '0 8px 24px #0004',
                 fontFamily: "'SKModernist', sans-serif",
-                fontSize: '0.875rem',
+                fontSize: 'var(--text-body)',
                 fontWeight: '600',
                 pointerEvents: 'auto',
                 lineHeight: 1.4,
               }}
             >
-              <span style={{ fontSize: '1.1rem', flexShrink: 0, fontWeight: '900' }}>{s.icon}</span>
+              <span style={{ fontSize: 'var(--text-subtitle)', flexShrink: 0, fontWeight: '900' }}>{s.icon}</span>
               <span style={{ flex: 1 }}>{t.message}</span><button aria-label="Cerrar notificación" onClick={() => setToasts(prev => prev.filter(item => item.id !== t.id))} style={{background: 'transparent', color: 'inherit', padding: '8px'}}>×</button>
             </div>
           )

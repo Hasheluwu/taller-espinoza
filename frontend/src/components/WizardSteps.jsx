@@ -34,17 +34,17 @@ export default function WizardSteps({ currentStep = 1 }) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: '900',
-                fontSize: '0.9rem',
+                fontSize: 'var(--text-body)',
                 boxShadow: isActive ? 'var(--glow-cyan)' : isDone ? 'var(--glow-emerald)' : 'none'
               }}>
                 {isDone ? '✓' : step.number}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '0.875rem', fontWeight: '800', color: isActive ? '#ffac7c' : isDone ? '#34d399' : '#f9fafb', lineHeight: 1.1 }}>
+                <span style={{ fontSize: 'var(--text-body)', fontWeight: '800', color: isActive ? '#ffac7c' : isDone ? '#34d399' : '#f9fafb', lineHeight: 1.1 }}>
                   {step.number}. {step.title}
                 </span>
-                <span style={{ fontSize: '0.725rem', color: '#9ca3af' }}>
+                <span style={{ fontSize: 'var(--text-xs)', color: '#9ca3af' }}>
                   {step.desc}
                 </span>
               </div>

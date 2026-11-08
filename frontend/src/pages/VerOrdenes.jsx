@@ -100,10 +100,10 @@ export default function VerOrdenes() {
       {/* HEADER */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <span style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--accent)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+          <span style={{ fontSize: 'var(--text-xs)', fontWeight: '800', color: 'var(--accent)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
             OPERACIÓN DEL TALLER
           </span>
-          <h1 style={{ fontSize: '1.85rem', fontWeight: '800', color: '#f9fafb', margin: 0, lineHeight: 1.1 }}>
+          <h1 style={{ fontSize: 'var(--text-title)', fontWeight: '800', color: '#f9fafb', margin: 0, lineHeight: 1.1 }}>
             Órdenes de trabajo
           </h1>
         </div>
@@ -118,7 +118,7 @@ export default function VerOrdenes() {
                 fontWeight: vistaModo === 'kanban' ? '800' : '600',
                 padding: '0.45rem 0.85rem',
                 borderRadius: '6px',
-                fontSize: '0.825rem'
+                fontSize: 'var(--text-small)'
               }}
             >
               Tablero
@@ -131,7 +131,7 @@ export default function VerOrdenes() {
                 fontWeight: vistaModo === 'tabla' ? '800' : '600',
                 padding: '0.45rem 0.85rem',
                 borderRadius: '6px',
-                fontSize: '0.825rem'
+                fontSize: 'var(--text-small)'
               }}
             >
               Lista
@@ -183,7 +183,7 @@ export default function VerOrdenes() {
             return (
               <div key={col.key} className="kanban-column" style={{ borderTop: `4px solid ${col.color}` }}>
                 <div className="kanban-column-header">
-                  <span style={{ fontSize: '0.9rem', fontWeight: '800', color: '#f9fafb' }}>
+                  <span style={{ fontSize: 'var(--text-body)', fontWeight: '800', color: '#f9fafb' }}>
                     {col.title}
                   </span>
                   <span className={`badge-cyber ${col.badgeClass}`}>
@@ -212,7 +212,7 @@ export default function VerOrdenes() {
                           backgroundColor: '#dce4d5',
                           color: '#182016',
                           fontWeight: '900',
-                          fontSize: '0.9rem',
+                          fontSize: 'var(--text-body)',
                           padding: '0.25rem 0.65rem',
                           borderRadius: '6px',
                           border: '1px solid #dce4d5'
@@ -220,21 +220,21 @@ export default function VerOrdenes() {
                           {orden.matricula}
                         </span>
 
-                        <span style={{ fontSize: '0.7rem', fontWeight: '700', color: '#fb923c', textTransform: 'uppercase' }}>
+                        <span style={{ fontSize: 'var(--text-xs)', fontWeight: '700', color: '#fb923c', textTransform: 'uppercase' }}>
                           {orden.tipo_pago}
                         </span>
                       </div>
 
                       <div>
-                        <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: '#f9fafb', margin: 0 }}>
+                        <h4 style={{ fontSize: 'var(--text-body)', fontWeight: '700', color: '#f9fafb', margin: 0 }}>
                           {orden.nombre_cliente}
                         </h4>
-                        <span style={{ fontSize: '0.78rem', color: '#9ca3af', textTransform: 'capitalize' }}>
+                        <span style={{ fontSize: 'var(--text-xs)', color: '#9ca3af', textTransform: 'capitalize' }}>
                           Trabajo: {orden.tipo}
                         </span>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.75rem', color: '#979faa', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 'var(--text-xs)', color: '#979faa', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.5rem' }}>
                         <span>Ingreso: {new Date(orden.fecha_ingreso).toLocaleDateString('es-NI')}</span>
                         <span style={{ color: 'var(--accent)', fontWeight: '700' }}>Abrir orden ↗</span>
                       </div>
@@ -242,7 +242,7 @@ export default function VerOrdenes() {
                   ))}
 
                   {ordenesCol.length === 0 && (
-                    <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#979faa', fontSize: '0.8rem', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '8px' }}>
+                    <div style={{ textAlign: 'center', padding: '2rem 1rem', color: '#979faa', fontSize: 'var(--text-small)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '8px' }}>
                       Sin vehículos
                     </div>
                   )}
@@ -256,9 +256,9 @@ export default function VerOrdenes() {
       {/* VISTA TABLA */}
       {mes && vistaModo === 'tabla' && (
         <div key="table" className="card-cyber view-enter" style={{ padding: '1.25rem', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.875rem' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 'var(--text-body)' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#979faa', fontSize: '0.75rem', textTransform: 'uppercase' }}>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#979faa', fontSize: 'var(--text-xs)', textTransform: 'uppercase' }}>
                 <th style={{ padding: '0.75rem' }}>Matrícula</th>
                 <th style={{ padding: '0.75rem' }}>Cliente</th>
                 <th style={{ padding: '0.75rem' }}>Tipo</th>
@@ -274,10 +274,10 @@ export default function VerOrdenes() {
                   <td style={{ padding: '0.75rem', color: '#9ca3af', textTransform: 'capitalize' }}>{o.tipo}</td>
                   <td style={{ padding: '0.75rem', textTransform: 'capitalize', color: '#34d399', fontWeight: '700' }}>{o.estado.replace('_', ' ')}</td>
                   <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                    <button onClick={() => navigate(`/ordenes/${o.id}/operaciones`)} className="btn-cyber-outline" style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem', marginRight: '0.4rem' }}>
+                    <button onClick={() => navigate(`/ordenes/${o.id}/operaciones`)} className="btn-cyber-outline" style={{ fontSize: 'var(--text-xs)', padding: '0.35rem 0.65rem', marginRight: '0.4rem' }}>
                       Operaciones
                     </button>
-                    <button onClick={() => navigate(`/ordenes/${o.id}/pago`)} className="btn-cyber-orange" style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}>
+                    <button onClick={() => navigate(`/ordenes/${o.id}/pago`)} className="btn-cyber-orange" style={{ fontSize: 'var(--text-xs)', padding: '0.35rem 0.65rem' }}>
                       {o.pagado ? '✓ Pagado' : 'Ver pagos'}
                     </button>
                   </td>

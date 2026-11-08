@@ -294,8 +294,8 @@ export default function Inventario() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <span className="section-kicker">RECURSOS / ALMACÉN</span>
-          <h1 style={{ fontSize: '2.2rem', fontWeight: 'bold', color: 'var(--foreground)' }}>Inventario de materiales</h1>
-          <p style={{ fontSize: '0.875rem', color: 'var(--neutral-400)' }}>Gestión de productos consumibles, stock bajo, compras e historial de movimientos.</p>
+          <h1 style={{ fontSize: 'var(--text-title)', fontWeight: 'bold', color: 'var(--foreground)' }}>Inventario de materiales</h1>
+          <p style={{ fontSize: 'var(--text-body)', color: 'var(--neutral-400)' }}>Gestión de productos consumibles, stock bajo, compras e historial de movimientos.</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
           <button
@@ -312,7 +312,7 @@ export default function Inventario() {
               setModalCompra(true)
             }}
             className="btn-cyber-emerald"
-            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+            style={{ padding: '0.5rem 1rem', fontSize: 'var(--text-body)' }}
           >
             Registrar compra
           </button>
@@ -320,7 +320,7 @@ export default function Inventario() {
           <button
             onClick={() => setModalAjuste(true)}
             className="btn-cyber-cyan"
-            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+            style={{ padding: '0.5rem 1rem', fontSize: 'var(--text-body)' }}
           >
             Ajuste manual
           </button>
@@ -328,7 +328,7 @@ export default function Inventario() {
           <button
             onClick={cargarMovimientos}
             className="btn-cyber-outline"
-            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+            style={{ padding: '0.5rem 1rem', fontSize: 'var(--text-body)' }}
           >
             Movimientos
           </button>
@@ -336,7 +336,7 @@ export default function Inventario() {
           <button
             onClick={abrirNuevoProducto}
             className="btn-cyber-orange"
-            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}
+            style={{ padding: '0.5rem 1rem', fontSize: 'var(--text-body)' }}
           >
             + Nuevo producto
           </button>
@@ -429,13 +429,13 @@ export default function Inventario() {
       {modalProducto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '550px', maxHeight: '90vh', overflowY: 'auto', padding: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>
+            <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>
               {prodForm.id ? 'Editar Producto de Inventario' : 'Agregar Nuevo Producto'}
             </h2>
 
             <form onSubmit={handleGuardarProducto} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Nombre del Producto *</label>
+                <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Nombre del Producto *</label>
                 <input
                   type="text"
                   required
@@ -447,7 +447,7 @@ export default function Inventario() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Precio Unitario (C$) *</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Precio Unitario (C$) *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -458,7 +458,7 @@ export default function Inventario() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Unidad de Medida *</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Unidad de Medida *</label>
                   <select
                     value={prodForm.unidad_medida}
                     onChange={(e) => setProdForm({ ...prodForm, unidad_medida: e.target.value })}
@@ -477,7 +477,7 @@ export default function Inventario() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 {!prodForm.id && (
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Cantidad Inicial</label>
+                    <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Cantidad Inicial</label>
                     <input
                       type="number"
                       step="0.01"
@@ -488,7 +488,7 @@ export default function Inventario() {
                   </div>
                 )}
                 <div style={{ gridColumn: prodForm.id ? 'span 2' : 'span 1' }}>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Stock Mínimo Alerta</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Stock Mínimo Alerta</label>
                   <input
                     type="number"
                     step="0.01"
@@ -500,7 +500,7 @@ export default function Inventario() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Fecha Expiración (Opcional)</label>
+                <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Fecha Expiración (Opcional)</label>
                 <input
                   type="date"
                   value={prodForm.fecha_expiracion}
@@ -512,11 +512,11 @@ export default function Inventario() {
               {/* Proveedor / Inline Creation */}
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <label style={{ fontSize: '0.875rem', color: 'var(--foreground)', fontWeight: 'bold' }}>Proveedor</label>
+                  <label style={{ fontSize: 'var(--text-body)', color: 'var(--foreground)', fontWeight: 'bold' }}>Proveedor</label>
                   <button
                     type="button"
                     onClick={() => setCreandoProveedorInline(!creandoProveedorInline)}
-                    style={{ background: 'none', border: 'none', color: 'var(--yellow-400)', fontSize: '0.8rem', cursor: 'pointer' }}
+                    style={{ background: 'none', border: 'none', color: 'var(--yellow-400)', fontSize: 'var(--text-small)', cursor: 'pointer' }}
                   >
                     {creandoProveedorInline ? '← Seleccionar existente' : '+ Crear nuevo proveedor'}
                   </button>
@@ -548,7 +548,7 @@ export default function Inventario() {
                       onChange={(e) => setProdForm({ ...prodForm, nuevo_prov_contacto: e.target.value })}
                       style={{ width: '100%', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem' }}
                     />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--foreground)', fontSize: '0.8rem' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--foreground)', fontSize: 'var(--text-small)' }}>
                       <input
                         type="checkbox"
                         checked={prodForm.nuevo_prov_iva}
@@ -584,12 +584,12 @@ export default function Inventario() {
       {modalCompra && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '750px', maxHeight: '90vh', overflowY: 'auto', padding: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>Registrar compra de Mercadería</h2>
+            <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>Registrar compra de Mercadería</h2>
 
             <form onSubmit={handleGuardarCompra} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Proveedor</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Proveedor</label>
                   <select
                     value={compraForm.id_proveedor}
                     onChange={(e) => setCompraForm({ ...compraForm, id_proveedor: e.target.value })}
@@ -600,7 +600,7 @@ export default function Inventario() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Fecha de Compra *</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Fecha de Compra *</label>
                   <input
                     type="date"
                     required
@@ -612,7 +612,7 @@ export default function Inventario() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Agregar Producto a la Compra</label>
+                <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Agregar Producto a la Compra</label>
                 <select
                   onChange={(e) => {
                     if (e.target.value) {
@@ -629,14 +629,14 @@ export default function Inventario() {
 
               {/* Lista de Ítems */}
               <div style={{ backgroundColor: 'var(--background)', borderRadius: '0.375rem', padding: '0.75rem', border: '1px solid var(--border)' }}>
-                <h4 style={{ fontSize: '0.875rem', fontWeight: 'bold', marginBottom: '0.5rem', color: 'var(--foreground)' }}>Productos en la Compra:</h4>
+                <h4 style={{ fontSize: 'var(--text-body)', fontWeight: 'bold', marginBottom: '0.5rem', color: 'var(--foreground)' }}>Productos en la Compra:</h4>
                 {compraForm.items.length === 0 ? (
-                  <p style={{ fontSize: '0.8rem', color: 'var(--neutral-400)' }}>No se han agregado productos.</p>
+                  <p style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-400)' }}>No se han agregado productos.</p>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {compraForm.items.map((item, idx) => (
                       <div key={idx} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '0.5rem', alignItems: 'center' }}>
-                        <span style={{ fontSize: '0.875rem', color: 'var(--foreground)' }}>{item.nombre}</span>
+                        <span style={{ fontSize: 'var(--text-body)', color: 'var(--foreground)' }}>{item.nombre}</span>
                         <input
                           type="number"
                           step="0.01"
@@ -680,10 +680,10 @@ export default function Inventario() {
                   <span>Aplica IVA (15%)</span>
                 </label>
 
-                <div style={{ textAlign: 'right', fontSize: '0.875rem', color: 'var(--foreground)' }}>
+                <div style={{ textAlign: 'right', fontSize: 'var(--text-body)', color: 'var(--foreground)' }}>
                   <div>Subtotal: <strong>C$ {compraForm.monto_subtotal}</strong></div>
                   <div>IVA: <strong>C$ {compraForm.monto_iva}</strong></div>
-                  <div style={{ fontSize: '1.1rem', color: 'var(--yellow-400)', fontWeight: 'bold' }}>Total: C$ {compraForm.monto_total}</div>
+                  <div style={{ fontSize: 'var(--text-subtitle)', color: 'var(--yellow-400)', fontWeight: 'bold' }}>Total: C$ {compraForm.monto_total}</div>
                 </div>
               </div>
 
@@ -711,11 +711,11 @@ export default function Inventario() {
       {modalAjuste && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '480px', padding: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>Ajuste manual de Inventario</h2>
+            <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>Ajuste manual de Inventario</h2>
 
             <form onSubmit={handleGuardarAjuste} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Producto *</label>
+                <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Producto *</label>
                 <select
                   required
                   value={ajusteForm.id_inventario}
@@ -729,7 +729,7 @@ export default function Inventario() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Tipo de Ajuste</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Tipo de Ajuste</label>
                   <select
                     value={ajusteForm.tipo_ajuste}
                     onChange={(e) => setAjusteForm({ ...ajusteForm, tipo_ajuste: e.target.value })}
@@ -740,7 +740,7 @@ export default function Inventario() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Cantidad *</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Cantidad *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -753,7 +753,7 @@ export default function Inventario() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Nota / Justificación</label>
+                <label style={{ display: 'block', fontSize: 'var(--text-body)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Nota / Justificación</label>
                 <textarea
                   rows="2"
                   placeholder="Ej: Corrección de conteo, producto dañado, etc."
@@ -787,8 +787,8 @@ export default function Inventario() {
       {modalDetalle && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '500px', padding: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>🔍 Detalle de Producto</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', color: 'var(--foreground)', fontSize: '0.9rem' }}>
+            <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>🔍 Detalle de Producto</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', color: 'var(--foreground)', fontSize: 'var(--text-body)' }}>
               <div><strong>Nombre:</strong> {modalDetalle.nombre}</div>
               <div><strong>Proveedor:</strong> {modalDetalle.proveedor_nombre || 'N/A'}</div>
               <div><strong>Precio Unitario:</strong> C$ {Number(modalDetalle.precio_unidad).toFixed(2)}</div>
@@ -813,11 +813,11 @@ export default function Inventario() {
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '850px', maxHeight: '85vh', overflowY: 'auto', padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--foreground)' }}>📜 Historial de Movimientos</h2>
-              <button onClick={() => setModalMovimientos(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+              <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', color: 'var(--foreground)' }}>📜 Historial de Movimientos</h2>
+              <button onClick={() => setModalMovimientos(false)} style={{ background: 'none', border: 'none', color: 'var(--foreground)', cursor: 'pointer', fontSize: 'var(--text-subtitle)' }}>✕</button>
             </div>
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', color: 'var(--foreground)', fontSize: '0.85rem' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', color: 'var(--foreground)', fontSize: 'var(--text-small)' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left' }}>
                   <th style={{ padding: '0.5rem' }}>Fecha</th>
@@ -837,7 +837,7 @@ export default function Inventario() {
                       <span style={{
                         padding: '0.15rem 0.4rem',
                         borderRadius: '0.2rem',
-                        fontSize: '0.75rem',
+                        fontSize: 'var(--text-xs)',
                         fontWeight: 600,
                         backgroundColor: m.tipo === 'entrada_compra' ? 'rgba(16, 185, 129, 0.2)' : m.tipo === 'salida_orden' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(99, 102, 241, 0.2)',
                         color: m.tipo === 'entrada_compra' ? '#10B981' : m.tipo === 'salida_orden' ? '#EF4444' : '#6366F1'

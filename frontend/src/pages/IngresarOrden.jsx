@@ -585,9 +585,9 @@ const s = {
 
   busqRow:            { display: 'flex', gap: '0.5rem', alignItems: 'stretch' },
 
-  btnFiltros:         { backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', color: 'var(--neutral-300)', borderRadius: 'var(--radius-md)', padding: '0 0.75rem', fontSize: '1rem', cursor: 'pointer', position: 'relative', flexShrink: 0 },
-  btnFiltrosActivo:   { backgroundColor: 'rgba(255,195,0,0.12)', border: '1px solid var(--yellow-500)', color: 'var(--yellow-400)', borderRadius: 'var(--radius-md)', padding: '0 0.75rem', fontSize: '1rem', cursor: 'pointer', position: 'relative', flexShrink: 0 },
-  btnFiltrosDisabled: { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--neutral-500)', borderRadius: 'var(--radius-md)', padding: '0 0.75rem', fontSize: '1rem', cursor: 'not-allowed', opacity: 0.5, flexShrink: 0 },
+  btnFiltros:         { backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', color: 'var(--neutral-300)', borderRadius: 'var(--radius-md)', padding: '0 0.75rem', fontSize: 'var(--text-body-lg)', cursor: 'pointer', position: 'relative', flexShrink: 0 },
+  btnFiltrosActivo:   { backgroundColor: 'rgba(255,195,0,0.12)', border: '1px solid var(--yellow-500)', color: 'var(--yellow-400)', borderRadius: 'var(--radius-md)', padding: '0 0.75rem', fontSize: 'var(--text-body-lg)', cursor: 'pointer', position: 'relative', flexShrink: 0 },
+  btnFiltrosDisabled: { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--neutral-500)', borderRadius: 'var(--radius-md)', padding: '0 0.75rem', fontSize: 'var(--text-body-lg)', cursor: 'not-allowed', opacity: 0.5, flexShrink: 0 },
   filtrosDot:         { position: 'absolute', top: '6px', right: '6px', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--yellow-500)' },
 
   panelFiltros:       { position: 'absolute', top: 'calc(100% + 6px)', right: 0, backgroundColor: 'var(--surface-raised)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '1.25rem', zIndex: 200, boxShadow: '0 8px 32px rgba(0,0,0,0.4)', minWidth: '280px', display: 'flex', flexDirection: 'column', gap: '1rem' },

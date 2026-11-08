@@ -219,8 +219,8 @@ export default function Repuestos() {
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 20px)', padding: '1.5rem', boxSizing: 'border-box' }}>
       {/* ── Encabezado ── */}
       <div style={{ marginBottom: '1rem', flexShrink: 0 }}>
-        <h1 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--foreground)' }}>🔩 Gestión de Repuestos</h1>
-        <p style={{ fontSize: '0.875rem', color: 'var(--neutral-400)' }}>
+        <h1 style={{ fontSize: 'var(--text-h)', fontWeight: 'bold', color: 'var(--foreground)' }}>🔩 Gestión de Repuestos</h1>
+        <p style={{ fontSize: 'var(--text-body)', color: 'var(--neutral-400)' }}>
           Administra de forma independiente los repuestos propiedad del taller y los repuestos ingresados por clientes.
         </p>
       </div>
@@ -233,13 +233,13 @@ export default function Repuestos() {
           {/* Header Columna */}
           <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', backgroundColor: 'rgba(255, 195, 0, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--foreground)' }}>🏭 Repuestos del Taller</h2>
-              <span style={{ fontSize: '0.75rem', color: 'var(--neutral-400)' }}>Inventario propio (comprados o transferidos)</span>
+              <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', color: 'var(--foreground)' }}>🏭 Repuestos del Taller</h2>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>Inventario propio (comprados o transferidos)</span>
             </div>
             <button
               onClick={abrirNuevoTaller}
               className="btn-cyber-orange"
-              style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+              style={{ padding: '0.4rem 0.8rem', fontSize: 'var(--text-small)' }}
             >
               + Agregar Repuesto
             </button>
@@ -252,12 +252,12 @@ export default function Repuestos() {
               placeholder="Buscar por nombre, marca, modelo..."
               value={qTaller}
               onChange={(e) => setQTaller(e.target.value)}
-              style={{ flex: 1, backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: '0.85rem' }}
+              style={{ flex: 1, backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
             />
             <select
               value={estadoTaller}
               onChange={(e) => setEstadoTaller(e.target.value)}
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: '0.85rem' }}
+              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
             >
               <option value="">Todos los Estados</option>
               <option value="nuevo">Nuevo</option>
@@ -268,7 +268,7 @@ export default function Repuestos() {
             <select
               value={origenTaller}
               onChange={(e) => setOrigenTaller(e.target.value)}
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: '0.85rem' }}
+              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
             >
               <option value="">Todos los Orígenes</option>
               <option value="comprado">Comprado</option>
@@ -289,34 +289,34 @@ export default function Repuestos() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
                       <span style={{ fontWeight: 'bold', color: 'var(--foreground)' }}>{rep.nombre}</span>
                       <span style={{
-                        fontSize: '0.7rem', padding: '0.1rem 0.4rem', borderRadius: '0.2rem',
+                        fontSize: 'var(--text-xs)', padding: '0.1rem 0.4rem', borderRadius: '0.2rem',
                         backgroundColor: rep.origen === 'comprado' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)',
                         color: rep.origen === 'comprado' ? '#60A5FA' : '#F59E0B'
                       }}>
                         {rep.origen === 'comprado' ? 'Comprado' : 'De Cliente'}
                       </span>
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--neutral-400)' }}>
+                    <div style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-400)' }}>
                       Marca: {rep.marca} | Modelo: {rep.modelo} {rep.modelo_compatible && `(Comp: ${rep.modelo_compatible})`}
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--neutral-400)', marginTop: '0.25rem' }}>
+                    <div style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-400)', marginTop: '0.25rem' }}>
                       Estado: <span style={{ color: 'var(--foreground)' }}>{rep.estado}</span> | Stock: <strong style={{ color: 'var(--yellow-400)' }}>{rep.cantidad}</strong>
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-end' }}>
-                    <div style={{ fontSize: '1rem', fontWeight: 'bold', color: 'var(--foreground)' }}>
+                    <div style={{ fontSize: 'var(--text-body-lg)', fontWeight: 'bold', color: 'var(--foreground)' }}>
                       C$ {Number(rep.precio).toFixed(2)}
                     </div>
                     <div style={{ display: 'flex', gap: '0.3rem' }}>
                       <button
                         onClick={() => abrirEditarTaller(rep)}
-                        style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: '0.75rem' }}
+                        style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: 'var(--text-xs)' }}
                       >
                         ✏️
                       </button>
                       <button
                         onClick={() => handleEliminarTaller(rep.id)}
-                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid #EF4444', color: '#EF4444', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: '0.75rem' }}
+                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid #EF4444', color: '#EF4444', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: 'var(--text-xs)' }}
                       >
                         🗑️
                       </button>
@@ -333,8 +333,8 @@ export default function Repuestos() {
           {/* Header Columna */}
           <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', backgroundColor: 'rgba(59, 130, 246, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h2 style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'var(--foreground)' }}>🚗 Repuestos del Cliente</h2>
-              <span style={{ fontSize: '0.75rem', color: 'var(--neutral-400)' }}>Piezas traídas por el cliente vinculadas a una orden</span>
+              <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', color: 'var(--foreground)' }}>🚗 Repuestos del Cliente</h2>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>Piezas traídas por el cliente vinculadas a una orden</span>
             </div>
           </div>
 
@@ -345,12 +345,12 @@ export default function Repuestos() {
               placeholder="Buscar por cliente, pieza, matrícula..."
               value={qCliente}
               onChange={(e) => setQCliente(e.target.value)}
-              style={{ flex: 1, backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: '0.85rem' }}
+              style={{ flex: 1, backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
             />
             <select
               value={estadoCliente}
               onChange={(e) => setEstadoCliente(e.target.value)}
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: '0.85rem' }}
+              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
             >
               <option value="">Todos los Estados</option>
               <option value="en_taller">En Taller</option>
@@ -370,23 +370,23 @@ export default function Repuestos() {
                 <div key={rep.id} style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: '0.375rem', padding: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
                     <div>
-                      <h4 style={{ fontSize: '0.95rem', fontWeight: 'bold', color: 'var(--foreground)' }}>{rep.nombre}</h4>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--neutral-400)' }}>
+                      <h4 style={{ fontSize: 'var(--text-body)', fontWeight: 'bold', color: 'var(--foreground)' }}>{rep.nombre}</h4>
+                      <div style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-400)' }}>
                         Marca: {rep.marca} | Modelo: {rep.modelo} (Cant: {rep.cantidad})
                       </div>
                     </div>
-                    <span style={{ fontSize: '0.75rem', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', padding: '0.2rem 0.5rem', borderRadius: '0.25rem', color: 'var(--yellow-400)', fontWeight: 600 }}>
+                    <span style={{ fontSize: 'var(--text-xs)', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', padding: '0.2rem 0.5rem', borderRadius: '0.25rem', color: 'var(--yellow-400)', fontWeight: 600 }}>
                       Orden #{rep.orden_id}
                     </span>
                   </div>
 
-                  <div style={{ fontSize: '0.8rem', color: 'var(--neutral-300)', marginBottom: '0.75rem', backgroundColor: 'var(--surface)', padding: '0.4rem 0.6rem', borderRadius: '0.25rem' }}>
+                  <div style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)', marginBottom: '0.75rem', backgroundColor: 'var(--surface)', padding: '0.4rem 0.6rem', borderRadius: '0.25rem' }}>
                     👤 <strong>{rep.cliente_nombre}</strong> | 🚘 <strong>{rep.matricula}</strong> ({rep.vehiculo_marca} {rep.vehiculo_modelo})
                   </div>
 
                   {/* Selector de Estado */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--neutral-400)' }}>Cambiar Estado:</span>
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>Cambiar Estado:</span>
                     <select
                       value={rep.estado}
                       onChange={(e) => handleCambiarEstadoCliente(rep, e.target.value)}
@@ -397,7 +397,7 @@ export default function Repuestos() {
                         border: '1px solid var(--border)',
                         padding: '0.3rem 0.5rem',
                         borderRadius: '0.25rem',
-                        fontSize: '0.8rem',
+                        fontSize: 'var(--text-small)',
                         fontWeight: 600,
                         cursor: rep.estado === 'transferido_a_taller' ? 'not-allowed' : 'pointer'
                       }}
@@ -419,13 +419,13 @@ export default function Repuestos() {
       {modalTaller && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '500px', padding: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>
+            <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>
               {formTaller.id ? 'Editar Repuesto del Taller' : 'Agregar Repuesto al Taller'}
             </h2>
 
             <form onSubmit={handleGuardarTaller} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Nombre del Repuesto *</label>
+                <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Nombre del Repuesto *</label>
                 <input
                   type="text"
                   required
@@ -437,7 +437,7 @@ export default function Repuestos() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Marca *</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Marca *</label>
                   <input
                     type="text"
                     required
@@ -447,7 +447,7 @@ export default function Repuestos() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Modelo *</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Modelo *</label>
                   <input
                     type="text"
                     required
@@ -459,7 +459,7 @@ export default function Repuestos() {
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Modelos Compatibles (Opcional)</label>
+                <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Modelos Compatibles (Opcional)</label>
                 <input
                   type="text"
                   placeholder="Ej: Toyota Hilux 2016-2022"
@@ -471,7 +471,7 @@ export default function Repuestos() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Precio (C$) *</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Precio (C$) *</label>
                   <input
                     type="number"
                     step="0.01"
@@ -482,7 +482,7 @@ export default function Repuestos() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Cantidad / Stock *</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Cantidad / Stock *</label>
                   <input
                     type="number"
                     required
@@ -495,7 +495,7 @@ export default function Repuestos() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Estado del Repuesto</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Estado del Repuesto</label>
                   <select
                     value={formTaller.estado}
                     onChange={(e) => setFormTaller({ ...formTaller, estado: e.target.value })}
@@ -508,7 +508,7 @@ export default function Repuestos() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Origen</label>
+                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Origen</label>
                   <select
                     value={formTaller.origen}
                     onChange={(e) => setFormTaller({ ...formTaller, origen: e.target.value })}
@@ -544,15 +544,15 @@ export default function Repuestos() {
       {modalTransferir && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
           <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '450px', padding: '1.5rem' }}>
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 'bold', marginBottom: '0.75rem', color: 'var(--foreground)' }}>
+            <h3 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', marginBottom: '0.75rem', color: 'var(--foreground)' }}>
               🟢 Transferir Repuesto a Inventario del Taller
             </h3>
-            <p style={{ fontSize: '0.875rem', color: 'var(--neutral-300)', marginBottom: '1rem' }}>
+            <p style={{ fontSize: 'var(--text-body)', color: 'var(--neutral-300)', marginBottom: '1rem' }}>
               El repuesto <strong>{modalTransferir.nombre}</strong> será transferido al stock del taller con origen <em>"proveniente_de_cliente"</em>.
             </p>
 
             <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--foreground)' }}>
+              <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>
                 Asignar Precio Estimado de Venta (C$)
               </label>
               <input

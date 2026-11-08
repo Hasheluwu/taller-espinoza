@@ -55,14 +55,14 @@ function DebugResetBanner() {
       borderLeft: '4px solid #ff9559'
     }}>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
-        <span style={{ fontSize: '0.725rem', fontWeight: '800', color: 'var(--accent)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+        <span style={{ fontSize: 'var(--text-xs)', fontWeight: '800', color: 'var(--accent)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
           ENTORNO DE PRUEBAS — SEED DATA
         </span>
-        <span style={{ fontSize: '0.825rem', color: '#9ca3af' }}>
+        <span style={{ fontSize: 'var(--text-small)', color: '#9ca3af' }}>
           Rellenar base de datos con clientes, vehículos y órdenes inorgánicas de prueba
         </span>
         {msg && (
-          <span style={{ fontSize: '0.78rem', color: estado === 'ok' ? '#34d399' : '#fb7185', marginTop: '0.2rem' }}>
+          <span style={{ fontSize: 'var(--text-xs)', color: estado === 'ok' ? '#34d399' : '#fb7185', marginTop: '0.2rem' }}>
             {msg}
           </span>
         )}
@@ -72,7 +72,7 @@ function DebugResetBanner() {
         onClick={handleReset}
         disabled={estado === 'loading'}
         className="btn-cyber-outline"
-        style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
+        style={{ fontSize: 'var(--text-small)', padding: '0.45rem 0.85rem' }}
       >
         {estado === 'loading' ? 'Reiniciando...' : '⚡ Restaurar Seed'}
       </button>
