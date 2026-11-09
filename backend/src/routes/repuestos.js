@@ -38,6 +38,37 @@ const REPUESTO_TALLER_SELECT = `
   FROM vw_stock_repuesto_taller v
 `
 
+const REPUESTO_CLIENTE_SELECT = `
+  SELECT
+    CONCAT(rc.id_orden, '-', rc.num_item) AS id,
+    rc.id_orden,
+    rc.num_item,
+    rc.nombre,
+    ma.nombre AS marca,
+    mo.nombre AS modelo,
+    rc.cantidad,
+    CASE
+      WHEN tr.id_repuesto IS NOT NULL THEN 'transferido_a_taller'
+      ELSE rc.estado
+    END AS estado,
+    rc.descripcion,
+    o.id_orden AS orden_id,
+    o.estado AS orden_estado,
+    v.matricula,
+    vma.nombre AS vehiculo_marca,
+    vmo.nombre AS vehiculo_modelo,
+    c.nombre AS cliente_nombre
+  FROM repuesto_cliente rc
+  JOIN modelo mo ON mo.id_modelo = rc.id_modelo
+  JOIN marca ma ON ma.id_marca = mo.id_marca
+  LEFT JOIN transferencia_repuesto tr ON tr.id_orden = rc.id_orden AND tr.num_item = rc.num_item
+  JOIN orden o ON rc.id_orden = o.id_orden
+  JOIN vehiculo v ON o.matricula = v.matricula
+  JOIN modelo vmo ON vmo.id_modelo = v.id_modelo
+  JOIN marca vma ON vma.id_marca = vmo.id_marca
+  JOIN cliente c ON v.id_cliente = c.id_cliente
+`
+
 function formatRepuestoRow(row) {
   return {
     ...row,
@@ -198,37 +229,7 @@ router.delete('/taller/:id', requireAuth, requireAuth.admin, async (req, res) =>
 router.get('/cliente', requireAuth, async (req, res) => {
   const { q, estado } = req.query
 
-  let sql = `
-    SELECT
-      CONCAT(rc.id_orden, '-', rc.num_item) AS id,
-      rc.id_orden,
-      rc.num_item,
-      rc.nombre,
-      ma.nombre AS marca,
-      mo.nombre AS modelo,
-      rc.cantidad,
-      CASE
-        WHEN tr.id_repuesto IS NOT NULL THEN 'transferido_a_taller'
-        ELSE rc.estado
-      END AS estado,
-      rc.descripcion,
-      o.id_orden AS orden_id,
-      o.estado AS orden_estado,
-      v.matricula,
-      vma.nombre AS vehiculo_marca,
-      vmo.nombre AS vehiculo_modelo,
-      c.nombre AS cliente_nombre
-    FROM repuesto_cliente rc
-    JOIN modelo mo ON mo.id_modelo = rc.id_modelo
-    JOIN marca ma ON ma.id_marca = mo.id_marca
-    LEFT JOIN transferencia_repuesto tr ON tr.id_orden = rc.id_orden AND tr.num_item = rc.num_item
-    JOIN orden o ON rc.id_orden = o.id_orden
-    JOIN vehiculo v ON o.matricula = v.matricula
-    JOIN modelo vmo ON vmo.id_modelo = v.id_modelo
-    JOIN marca vma ON vma.id_marca = vmo.id_marca
-    JOIN cliente c ON v.id_cliente = c.id_cliente
-    WHERE 1=1
-  `
+  let sql = `${REPUESTO_CLIENTE_SELECT} WHERE 1=1`
   const params = []
 
   if (q && q.trim()) {
@@ -246,6 +247,111 @@ router.get('/cliente', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('Error al obtener repuestos de cliente:', err)
     res.status(500).json({ message: 'Error interno del servidor.' })
+  }
+})
+
+// POST /api/repuestos/cliente
+// Registrar un repuesto traído o dejado por el cliente asociado a una orden
+router.post('/cliente', requireAuth, async (req, res) => {
+  const {
+    id_orden,
+    nombre,
+    marca,
+    modelo,
+    cantidad = 1,
+    estado = 'en_taller',
+    descripcion,
+  } = req.body
+
+  const idOrden = parseInt(id_orden, 10)
+  if (!Number.isSafeInteger(idOrden) || idOrden <= 0) {
+    return res.status(400).json({ message: 'Debes seleccionar una orden de trabajo válida.' })
+  }
+  if (!nombre || !String(nombre).trim() || String(nombre).trim().length > 150) {
+    return res.status(400).json({ message: 'El nombre del repuesto es obligatorio (máximo 150 caracteres).' })
+  }
+  const cant = Number(cantidad)
+  if (!Number.isSafeInteger(cant) || cant <= 0) {
+    return res.status(400).json({ message: 'La cantidad debe ser un número entero mayor a cero.' })
+  }
+  if (!['en_taller', 'devuelto'].includes(estado)) {
+    return res.status(400).json({ message: 'El estado inicial debe ser "en_taller" o "devuelto".' })
+  }
+
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+
+    // 1. Verificar que la orden exista y obtener el modelo del vehículo por defecto
+    const [ordenRows] = await conn.query(
+      `SELECT o.id_orden, o.estado, o.matricula, v.id_modelo
+       FROM orden o
+       JOIN vehiculo v ON v.matricula = o.matricula
+       WHERE o.id_orden = ? FOR UPDATE`,
+      [idOrden]
+    )
+    if (ordenRows.length === 0) {
+      await conn.rollback()
+      return res.status(404).json({ message: 'La orden seleccionada no existe.' })
+    }
+    if (ordenRows[0].estado === 'cancelado') {
+      await conn.rollback()
+      return res.status(409).json({ message: 'No se pueden asociar repuestos a una orden cancelada.' })
+    }
+
+    // 2. Determinar id_modelo (si envió marca y modelo los normaliza, si no usa el del vehículo de la orden)
+    let idModelo = ordenRows[0].id_modelo
+    if (marca && String(marca).trim() && modelo && String(modelo).trim()) {
+      idModelo = await ensureModeloId(conn, marca.trim(), modelo.trim())
+    }
+
+    // 3. Calcular el siguiente num_item correlativo para esta orden
+    const [[maxItem]] = await conn.query(
+      'SELECT COALESCE(MAX(num_item), 0) + 1 AS next_item FROM repuesto_cliente WHERE id_orden = ?',
+      [idOrden]
+    )
+    const numItem = maxItem.next_item
+
+    // 4. Insertar en repuesto_cliente
+    await conn.query(
+      `INSERT INTO repuesto_cliente
+         (id_orden, num_item, nombre, id_modelo, cantidad, estado, descripcion)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        idOrden,
+        numItem,
+        String(nombre).trim(),
+        idModelo,
+        cant,
+        estado,
+        descripcion && String(descripcion).trim() ? String(descripcion).trim() : null,
+      ]
+    )
+
+    // 5. Registrar en auditoría
+    await conn.query(
+      `INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle)
+       VALUES (?, 'repuesto_cliente', ?, 'crear', ?)`,
+      [
+        req.usuario.id,
+        `${idOrden}-${numItem}`,
+        `Repuesto de cliente registrado en orden #${idOrden}: ${String(nombre).trim()} (x${cant})`,
+      ]
+    )
+
+    await conn.commit()
+
+    const [nuevo] = await pool.query(
+      `${REPUESTO_CLIENTE_SELECT} WHERE rc.id_orden = ? AND rc.num_item = ?`,
+      [idOrden, numItem]
+    )
+    res.status(201).json(nuevo[0])
+  } catch (err) {
+    await conn.rollback()
+    console.error('Error al crear repuesto de cliente:', err)
+    res.status(500).json({ message: 'Error interno al registrar el repuesto del cliente.' })
+  } finally {
+    conn.release()
   }
 })
 
@@ -297,6 +403,10 @@ router.patch('/cliente/:id/estado', requireAuth, async (req, res) => {
            (nombre, id_modelo, precio, cantidad_ingresada, id_condicion, fecha_ingreso)
          VALUES (?, ?, ?, ?, 2, CURDATE())`,
         [rc.nombre, rc.id_modelo, Number(precio_asignado || 0), rc.cantidad || 1]
+      )
+      await conn.query(
+        'INSERT IGNORE INTO compatibilidad_repuesto (id_repuesto, id_modelo) VALUES (?, ?)',
+        [repRes.insertId, rc.id_modelo]
       )
       await conn.query(
         'INSERT INTO transferencia_repuesto (id_orden, num_item, id_repuesto) VALUES (?, ?, ?)',

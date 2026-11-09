@@ -1,7 +1,7 @@
-import { useDeferredLoad } from '../hooks/useDeferredLoad'
-import { apiFetch } from '../lib/api'
 // frontend/src/pages/Repuestos.jsx
 import { useState, useCallback } from 'react'
+import { useDeferredLoad } from '../hooks/useDeferredLoad'
+import { apiFetch } from '../lib/api'
 import { useToast } from '../hooks/useToast'
 import { SkeletonList } from '../components/Skeleton'
 
@@ -9,6 +9,7 @@ export default function Repuestos() {
   const toast = useToast()
   const [repuestosTaller, setRepuestosTaller] = useState([])
   const [repuestosCliente, setRepuestosCliente] = useState([])
+  const [ordenesDisponibles, setOrdenesDisponibles] = useState([])
   const [loadingTaller, setLoadingTaller] = useState(true)
   const [loadingCliente, setLoadingCliente] = useState(true)
 
@@ -23,7 +24,8 @@ export default function Repuestos() {
 
   // Modales
   const [modalTaller, setModalTaller] = useState(false)
-  const [modalTransferir, setModalTransferir] = useState(null) // { repuestoCliente }
+  const [modalCliente, setModalCliente] = useState(false)
+  const [modalTransferir, setModalTransferir] = useState(null)
   const [precioTransferencia, setPrecioTransferencia] = useState('0')
 
   // Formulario Repuesto Taller (Crear / Editar)
@@ -36,8 +38,21 @@ export default function Repuestos() {
     precio: '',
     cantidad: 1,
     estado: 'nuevo',
-    origen: 'comprado'
+    origen: 'comprado',
   })
+
+  // Formulario Repuesto Cliente (Asociado a Orden)
+  const [formCliente, setFormCliente] = useState({
+    id_orden: '',
+    nombre: '',
+    marca: '',
+    modelo: '',
+    cantidad: 1,
+    estado: 'en_taller',
+    descripcion: '',
+  })
+  const [errorClienteModal, setErrorClienteModal] = useState('')
+  const [guardandoCliente, setGuardandoCliente] = useState(false)
 
   const token = localStorage.getItem('token')
 
@@ -50,7 +65,7 @@ export default function Repuestos() {
       if (origenTaller) params.append('origen', origenTaller)
 
       const res = await apiFetch(`/api/repuestos/taller?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {
         const data = await res.json()
@@ -71,7 +86,7 @@ export default function Repuestos() {
       if (estadoCliente) params.append('estado', estadoCliente)
 
       const res = await apiFetch(`/api/repuestos/cliente?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {
         const data = await res.json()
@@ -85,11 +100,92 @@ export default function Repuestos() {
   }, [qCliente, estadoCliente, token])
 
   useDeferredLoad(cargarTaller, 200)
-
   useDeferredLoad(cargarCliente, 200)
 
+  // Abrir modal para registrar repuesto de cliente y cargar órdenes activas/registradas
+  const abrirNuevoCliente = async () => {
+    setErrorClienteModal('')
+    setFormCliente({
+      id_orden: '',
+      nombre: '',
+      marca: '',
+      modelo: '',
+      cantidad: 1,
+      estado: 'en_taller',
+      descripcion: '',
+    })
+    setModalCliente(true)
+    try {
+      const res = await apiFetch('/api/ordenes', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setOrdenesDisponibles(data.filter(o => o.estado !== 'cancelado'))
+      }
+    } catch {
+      /* silencioso */
+    }
+  }
+
+  // Cuando el usuario selecciona una orden, autorrellenar marca y modelo del vehículo de esa orden
+  const handleSeleccionarOrdenCliente = idOrdenSeleccionada => {
+    const ordenObj = ordenesDisponibles.find(o => String(o.id) === String(idOrdenSeleccionada))
+    setFormCliente(prev => ({
+      ...prev,
+      id_orden: idOrdenSeleccionada,
+      marca: ordenObj?.marca || prev.marca,
+      modelo: ordenObj?.modelo || prev.modelo,
+    }))
+  }
+
+  // Guardar Repuesto del Cliente asociado a la Orden
+  const handleGuardarCliente = async e => {
+    e.preventDefault()
+    setErrorClienteModal('')
+    if (!formCliente.id_orden) {
+      setErrorClienteModal('Selecciona la orden de trabajo a la que pertenece el repuesto.')
+      return
+    }
+    if (!formCliente.nombre.trim()) {
+      setErrorClienteModal('Escribe el nombre o descripción de la pieza.')
+      return
+    }
+    if (!Number.isSafeInteger(Number(formCliente.cantidad)) || Number(formCliente.cantidad) <= 0) {
+      setErrorClienteModal('La cantidad debe ser un entero positivo (mínimo 1).')
+      return
+    }
+
+    setGuardandoCliente(true)
+    try {
+      const res = await apiFetch('/api/repuestos/cliente', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          id_orden: Number(formCliente.id_orden),
+          nombre: formCliente.nombre.trim(),
+          marca: formCliente.marca.trim(),
+          modelo: formCliente.modelo.trim(),
+          cantidad: Number(formCliente.cantidad),
+          estado: formCliente.estado,
+          descripcion: formCliente.descripcion.trim() || null,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.message || 'Error al registrar repuesto del cliente.')
+      }
+      setModalCliente(false)
+      cargarCliente()
+    } catch (err) {
+      setErrorClienteModal(err.message)
+    } finally {
+      setGuardandoCliente(false)
+    }
+  }
+
   // Guardar Repuesto Taller
-  const handleGuardarTaller = async (e) => {
+  const handleGuardarTaller = async e => {
     e.preventDefault()
     try {
       const url = formTaller.id ? `/api/repuestos/taller/${formTaller.id}` : '/api/repuestos/taller'
@@ -98,7 +194,7 @@ export default function Repuestos() {
       const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(formTaller)
+        body: JSON.stringify(formTaller),
       })
 
       if (!res.ok) {
@@ -114,12 +210,12 @@ export default function Repuestos() {
   }
 
   // Eliminar Repuesto Taller
-  const handleEliminarTaller = async (id) => {
+  const handleEliminarTaller = async id => {
     if (!window.confirm('¿Seguro que deseas eliminar este repuesto del taller?')) return
     try {
       const res = await apiFetch(`/api/repuestos/taller/${id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
       })
 
       if (!res.ok) {
@@ -145,7 +241,7 @@ export default function Repuestos() {
       const res = await apiFetch(`/api/repuestos/cliente/${rep.id}/estado`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ nuevo_estado: nuevoEstado })
+        body: JSON.stringify({ nuevo_estado: nuevoEstado }),
       })
 
       if (!res.ok) {
@@ -168,8 +264,8 @@ export default function Repuestos() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           nuevo_estado: 'transferido_a_taller',
-          precio_asignado: Number(precioTransferencia || 0)
-        })
+          precio_asignado: Number(precioTransferencia || 0),
+        }),
       })
 
       if (!res.ok) {
@@ -179,7 +275,7 @@ export default function Repuestos() {
 
       setModalTransferir(null)
       cargarCliente()
-      cargarTaller() // Refresca repuestos del taller para mostrar la nueva incorporación atómica
+      cargarTaller()
     } catch (err) {
       toast.error(err.message)
     }
@@ -195,12 +291,12 @@ export default function Repuestos() {
       precio: '',
       cantidad: 1,
       estado: 'nuevo',
-      origen: 'comprado'
+      origen: 'comprado',
     })
     setModalTaller(true)
   }
 
-  const abrirEditarTaller = (rep) => {
+  const abrirEditarTaller = rep => {
     setFormTaller({
       id: rep.id,
       nombre: rep.nombre,
@@ -210,16 +306,26 @@ export default function Repuestos() {
       precio: rep.precio,
       cantidad: rep.cantidad,
       estado: rep.estado,
-      origen: rep.origen
+      origen: rep.origen,
     })
     setModalTaller(true)
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 20px)', padding: '1.5rem', boxSizing: 'border-box' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: 'calc(100vh - 20px)',
+        padding: '1.5rem',
+        boxSizing: 'border-box',
+      }}
+    >
       {/* ── Encabezado ── */}
       <div style={{ marginBottom: '1rem', flexShrink: 0 }}>
-        <h1 style={{ fontSize: 'var(--text-h)', fontWeight: 'bold', color: 'var(--foreground)' }}>🔩 Gestión de Repuestos</h1>
+        <h1 style={{ fontSize: 'var(--text-h)', fontWeight: 'bold', color: 'var(--foreground)' }}>
+          🔩 Gestión de Repuestos
+        </h1>
         <p style={{ fontSize: 'var(--text-body)', color: 'var(--neutral-400)' }}>
           Administra de forma independiente los repuestos propiedad del taller y los repuestos ingresados por clientes.
         </p>
@@ -227,14 +333,34 @@ export default function Repuestos() {
 
       {/* ── Layout en 2 Columnas de Scroll Independiente ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', flex: 1, minHeight: 0 }}>
-
         {/* ── COLUMNA IZQUIERDA: REPUESTOS DEL TALLER ── */}
-        <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Header Columna */}
-          <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', backgroundColor: 'rgba(255, 195, 0, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          style={{
+            backgroundColor: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: '0.5rem',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              padding: '1rem',
+              borderBottom: '1px solid var(--border)',
+              backgroundColor: 'rgba(255, 195, 0, 0.05)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
             <div>
-              <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', color: 'var(--foreground)' }}>🏭 Repuestos del Taller</h2>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>Inventario propio (comprados o transferidos)</span>
+              <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', color: 'var(--foreground)' }}>
+                🏭 Repuestos del Taller
+              </h2>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>
+                Inventario propio (comprados o transferidos)
+              </span>
             </div>
             <button
               onClick={abrirNuevoTaller}
@@ -246,18 +372,41 @@ export default function Repuestos() {
           </div>
 
           {/* Filtros Taller */}
-          <div style={{ padding: '0.75rem', borderBottom: '1px solid var(--border)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              padding: '0.75rem',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex',
+              gap: '0.5rem',
+              flexWrap: 'wrap',
+            }}
+          >
             <input
               type="text"
               placeholder="Buscar por nombre, marca, modelo..."
               value={qTaller}
-              onChange={(e) => setQTaller(e.target.value)}
-              style={{ flex: 1, backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
+              onChange={e => setQTaller(e.target.value)}
+              style={{
+                flex: 1,
+                backgroundColor: 'var(--background)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                padding: '0.4rem',
+                borderRadius: '0.25rem',
+                fontSize: 'var(--text-small)',
+              }}
             />
             <select
               value={estadoTaller}
-              onChange={(e) => setEstadoTaller(e.target.value)}
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
+              onChange={e => setEstadoTaller(e.target.value)}
+              style={{
+                backgroundColor: 'var(--background)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                padding: '0.4rem',
+                borderRadius: '0.25rem',
+                fontSize: 'var(--text-small)',
+              }}
             >
               <option value="">Todos los Estados</option>
               <option value="nuevo">Nuevo</option>
@@ -267,8 +416,15 @@ export default function Repuestos() {
             </select>
             <select
               value={origenTaller}
-              onChange={(e) => setOrigenTaller(e.target.value)}
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
+              onChange={e => setOrigenTaller(e.target.value)}
+              style={{
+                backgroundColor: 'var(--background)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                padding: '0.4rem',
+                borderRadius: '0.25rem',
+                fontSize: 'var(--text-small)',
+              }}
             >
               <option value="">Todos los Orígenes</option>
               <option value="comprado">Comprado</option>
@@ -277,46 +433,99 @@ export default function Repuestos() {
           </div>
 
           {/* Lista / Scroll Taller */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '0.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+            }}
+          >
             {loadingTaller ? (
               <SkeletonList count={4} />
             ) : repuestosTaller.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--neutral-400)', padding: '2rem' }}>No hay repuestos registrados.</div>
+              <div style={{ textAlign: 'center', color: 'var(--neutral-400)', padding: '2rem' }}>
+                No hay repuestos registrados.
+              </div>
             ) : (
               repuestosTaller.map(rep => (
-                <div key={rep.id} style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: '0.375rem', padding: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div
+                  key={rep.id}
+                  style={{
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '0.375rem',
+                    padding: '0.75rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
                       <span style={{ fontWeight: 'bold', color: 'var(--foreground)' }}>{rep.nombre}</span>
-                      <span style={{
-                        fontSize: 'var(--text-xs)', padding: '0.1rem 0.4rem', borderRadius: '0.2rem',
-                        backgroundColor: rep.origen === 'comprado' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                        color: rep.origen === 'comprado' ? '#60A5FA' : '#F59E0B'
-                      }}>
+                      <span
+                        style={{
+                          fontSize: 'var(--text-xs)',
+                          padding: '0.1rem 0.4rem',
+                          borderRadius: '0.2rem',
+                          backgroundColor:
+                            rep.origen === 'comprado' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                          color: rep.origen === 'comprado' ? '#60A5FA' : '#F59E0B',
+                        }}
+                      >
                         {rep.origen === 'comprado' ? 'Comprado' : 'De Cliente'}
                       </span>
                     </div>
                     <div style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-400)' }}>
-                      Marca: {rep.marca} | Modelo: {rep.modelo} {rep.modelo_compatible && `(Comp: ${rep.modelo_compatible})`}
+                      Marca: {rep.marca} | Modelo: {rep.modelo}{' '}
+                      {rep.modelo_compatible && `(Comp: ${rep.modelo_compatible})`}
                     </div>
                     <div style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-400)', marginTop: '0.25rem' }}>
-                      Estado: <span style={{ color: 'var(--foreground)' }}>{rep.estado}</span> | Stock: <strong style={{ color: 'var(--yellow-400)' }}>{rep.cantidad}</strong>
+                      Estado: <span style={{ color: 'var(--foreground)' }}>{rep.estado}</span> | Stock:{' '}
+                      <strong style={{ color: 'var(--yellow-400)' }}>{rep.cantidad}</strong>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '0.5rem', alignItems: 'flex-end' }}>
+                  <div
+                    style={{
+                      textAlign: 'right',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.5rem',
+                      alignItems: 'flex-end',
+                    }}
+                  >
                     <div style={{ fontSize: 'var(--text-body-lg)', fontWeight: 'bold', color: 'var(--foreground)' }}>
                       C$ {Number(rep.precio).toFixed(2)}
                     </div>
                     <div style={{ display: 'flex', gap: '0.3rem' }}>
                       <button
                         onClick={() => abrirEditarTaller(rep)}
-                        style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: 'var(--text-xs)' }}
+                        style={{
+                          backgroundColor: 'var(--surface)',
+                          border: '1px solid var(--border)',
+                          color: 'var(--foreground)',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '0.25rem',
+                          cursor: 'pointer',
+                          fontSize: 'var(--text-xs)',
+                        }}
                       >
                         ✏️
                       </button>
                       <button
                         onClick={() => handleEliminarTaller(rep.id)}
-                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', border: '1px solid #EF4444', color: '#EF4444', padding: '0.25rem 0.5rem', borderRadius: '0.25rem', cursor: 'pointer', fontSize: 'var(--text-xs)' }}
+                        style={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                          border: '1px solid #EF4444',
+                          color: '#EF4444',
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '0.25rem',
+                          cursor: 'pointer',
+                          fontSize: 'var(--text-xs)',
+                        }}
                       >
                         🗑️
                       </button>
@@ -329,13 +538,42 @@ export default function Repuestos() {
         </div>
 
         {/* ── COLUMNA DERECHA: REPUESTOS DEL CLIENTE ── */}
-        <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {/* Header Columna */}
-          <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', backgroundColor: 'rgba(59, 130, 246, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div
+          style={{
+            backgroundColor: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: '0.5rem',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              padding: '1rem',
+              borderBottom: '1px solid var(--border)',
+              backgroundColor: 'rgba(59, 130, 246, 0.05)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '0.75rem',
+            }}
+          >
             <div>
-              <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', color: 'var(--foreground)' }}>🚗 Repuestos del Cliente</h2>
-              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>Piezas traídas por el cliente vinculadas a una orden</span>
+              <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', color: 'var(--foreground)' }}>
+                🚗 Repuestos del Cliente
+              </h2>
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>
+                Piezas traídas o dejadas por el cliente vinculadas a una orden
+              </span>
             </div>
+            <button
+              onClick={abrirNuevoCliente}
+              className="btn-cyber-orange"
+              style={{ padding: '0.4rem 0.8rem', fontSize: 'var(--text-small)', flexShrink: 0 }}
+            >
+              + Registrar Pieza de Cliente
+            </button>
           </div>
 
           {/* Filtros Cliente */}
@@ -344,13 +582,28 @@ export default function Repuestos() {
               type="text"
               placeholder="Buscar por cliente, pieza, matrícula..."
               value={qCliente}
-              onChange={(e) => setQCliente(e.target.value)}
-              style={{ flex: 1, backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
+              onChange={e => setQCliente(e.target.value)}
+              style={{
+                flex: 1,
+                backgroundColor: 'var(--background)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                padding: '0.4rem',
+                borderRadius: '0.25rem',
+                fontSize: 'var(--text-small)',
+              }}
             />
             <select
               value={estadoCliente}
-              onChange={(e) => setEstadoCliente(e.target.value)}
-              style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.4rem', borderRadius: '0.25rem', fontSize: 'var(--text-small)' }}
+              onChange={e => setEstadoCliente(e.target.value)}
+              style={{
+                backgroundColor: 'var(--background)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                padding: '0.4rem',
+                borderRadius: '0.25rem',
+                fontSize: 'var(--text-small)',
+              }}
             >
               <option value="">Todos los Estados</option>
               <option value="en_taller">En Taller</option>
@@ -360,46 +613,113 @@ export default function Repuestos() {
           </div>
 
           {/* Lista / Scroll Cliente */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '0.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+            }}
+          >
             {loadingCliente ? (
               <SkeletonList count={4} />
             ) : repuestosCliente.length === 0 ? (
-              <div style={{ textAlign: 'center', color: 'var(--neutral-400)', padding: '2rem' }}>No hay repuestos de clientes registrados.</div>
+              <div style={{ textAlign: 'center', color: 'var(--neutral-400)', padding: '2rem' }}>
+                No hay repuestos de clientes registrados.
+              </div>
             ) : (
               repuestosCliente.map(rep => (
-                <div key={rep.id} style={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: '0.375rem', padding: '0.75rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                <div
+                  key={rep.id}
+                  style={{
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '0.375rem',
+                    padding: '0.75rem',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      marginBottom: '0.5rem',
+                    }}
+                  >
                     <div>
-                      <h4 style={{ fontSize: 'var(--text-body)', fontWeight: 'bold', color: 'var(--foreground)' }}>{rep.nombre}</h4>
+                      <h4 style={{ fontSize: 'var(--text-body)', fontWeight: 'bold', color: 'var(--foreground)' }}>
+                        {rep.nombre}
+                      </h4>
                       <div style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-400)' }}>
                         Marca: {rep.marca} | Modelo: {rep.modelo} (Cant: {rep.cantidad})
                       </div>
+                      {rep.descripcion && (
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-300)', marginTop: '0.2rem' }}>
+                          Nota: {rep.descripcion}
+                        </div>
+                      )}
                     </div>
-                    <span style={{ fontSize: 'var(--text-xs)', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', padding: '0.2rem 0.5rem', borderRadius: '0.25rem', color: 'var(--yellow-400)', fontWeight: 600 }}>
+                    <span
+                      style={{
+                        fontSize: 'var(--text-xs)',
+                        backgroundColor: 'var(--surface)',
+                        border: '1px solid var(--border)',
+                        padding: '0.2rem 0.5rem',
+                        borderRadius: '0.25rem',
+                        color: 'var(--yellow-400)',
+                        fontWeight: 600,
+                      }}
+                    >
                       Orden #{rep.orden_id}
                     </span>
                   </div>
 
-                  <div style={{ fontSize: 'var(--text-small)', color: 'var(--neutral-300)', marginBottom: '0.75rem', backgroundColor: 'var(--surface)', padding: '0.4rem 0.6rem', borderRadius: '0.25rem' }}>
-                    👤 <strong>{rep.cliente_nombre}</strong> | 🚘 <strong>{rep.matricula}</strong> ({rep.vehiculo_marca} {rep.vehiculo_modelo})
+                  <div
+                    style={{
+                      fontSize: 'var(--text-small)',
+                      color: 'var(--neutral-300)',
+                      marginBottom: '0.75rem',
+                      backgroundColor: 'var(--surface)',
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: '0.25rem',
+                    }}
+                  >
+                    👤 <strong>{rep.cliente_nombre}</strong> | 🚘 <strong>{rep.matricula}</strong> ({rep.vehiculo_marca}{' '}
+                    {rep.vehiculo_modelo})
                   </div>
 
                   {/* Selector de Estado */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      borderTop: '1px solid var(--border)',
+                      paddingTop: '0.5rem',
+                    }}
+                  >
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)' }}>Cambiar Estado:</span>
                     <select
                       value={rep.estado}
-                      onChange={(e) => handleCambiarEstadoCliente(rep, e.target.value)}
-                      disabled={rep.estado === 'transferido_a_taller'} // Bloqueado si ya fue transferido
+                      onChange={e => handleCambiarEstadoCliente(rep, e.target.value)}
+                      disabled={rep.estado === 'transferido_a_taller'}
                       style={{
-                        backgroundColor: rep.estado === 'en_taller' ? 'rgba(59, 130, 246, 0.15)' : rep.estado === 'devuelto' ? 'rgba(107, 114, 128, 0.2)' : 'rgba(16, 185, 129, 0.2)',
-                        color: rep.estado === 'en_taller' ? '#60A5FA' : rep.estado === 'devuelto' ? '#9CA3AF' : '#10B981',
+                        backgroundColor:
+                          rep.estado === 'en_taller'
+                            ? 'rgba(59, 130, 246, 0.15)'
+                            : rep.estado === 'devuelto'
+                              ? 'rgba(107, 114, 128, 0.2)'
+                              : 'rgba(16, 185, 129, 0.2)',
+                        color:
+                          rep.estado === 'en_taller' ? '#60A5FA' : rep.estado === 'devuelto' ? '#9CA3AF' : '#10B981',
                         border: '1px solid var(--border)',
                         padding: '0.3rem 0.5rem',
                         borderRadius: '0.25rem',
                         fontSize: 'var(--text-small)',
                         fontWeight: 600,
-                        cursor: rep.estado === 'transferido_a_taller' ? 'not-allowed' : 'pointer'
+                        cursor: rep.estado === 'transferido_a_taller' ? 'not-allowed' : 'pointer',
                       }}
                     >
                       <option value="en_taller">🔵 En Taller</option>
@@ -412,125 +732,241 @@ export default function Repuestos() {
             )}
           </div>
         </div>
-
       </div>
 
       {/* ── Modal Nuevo / Editar Repuesto Taller ── */}
       {modalTaller && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
-          <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '500px', padding: '1.5rem' }}>
-            <h2 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', marginBottom: '1rem', color: 'var(--foreground)' }}>
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '0.5rem',
+              width: '100%',
+              maxWidth: '500px',
+              padding: '1.5rem',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 'var(--text-subtitle)',
+                fontWeight: 'bold',
+                marginBottom: '1rem',
+                color: 'var(--foreground)',
+              }}
+            >
               {formTaller.id ? 'Editar Repuesto del Taller' : 'Agregar Repuesto al Taller'}
             </h2>
 
             <form onSubmit={handleGuardarTaller} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Nombre del Repuesto *</label>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 'var(--text-small)',
+                    marginBottom: '0.25rem',
+                    color: 'var(--foreground)',
+                  }}
+                >
+                  Nombre del Repuesto *
+                </label>
                 <input
                   type="text"
                   required
                   value={formTaller.nombre}
-                  onChange={(e) => setFormTaller({ ...formTaller, nombre: e.target.value })}
-                  style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
+                  onChange={e => setFormTaller({ ...formTaller, nombre: e.target.value })}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    padding: '0.5rem',
+                    borderRadius: '0.375rem',
+                  }}
                 />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Marca *</label>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--text-small)',
+                      marginBottom: '0.25rem',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    Marca *
+                  </label>
                   <input
                     type="text"
                     required
                     value={formTaller.marca}
-                    onChange={(e) => setFormTaller({ ...formTaller, marca: e.target.value })}
-                    style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
+                    onChange={e => setFormTaller({ ...formTaller, marca: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                    }}
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Modelo *</label>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--text-small)',
+                      marginBottom: '0.25rem',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    Modelo *
+                  </label>
                   <input
                     type="text"
                     required
                     value={formTaller.modelo}
-                    onChange={(e) => setFormTaller({ ...formTaller, modelo: e.target.value })}
-                    style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
+                    onChange={e => setFormTaller({ ...formTaller, modelo: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--text-small)',
+                      marginBottom: '0.25rem',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    Precio (C$) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={formTaller.precio}
+                    onChange={e => setFormTaller({ ...formTaller, precio: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--text-small)',
+                      marginBottom: '0.25rem',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    Cantidad / Stock *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    value={formTaller.cantidad}
+                    onChange={e => setFormTaller({ ...formTaller, cantidad: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                    }}
                   />
                 </div>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Modelos Compatibles (Opcional)</label>
-                <input
-                  type="text"
-                  placeholder="Ej: Toyota Hilux 2016-2022"
-                  value={formTaller.modelo_compatible}
-                  onChange={(e) => setFormTaller({ ...formTaller, modelo_compatible: e.target.value })}
-                  style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Precio (C$) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={formTaller.precio}
-                    onChange={(e) => setFormTaller({ ...formTaller, precio: e.target.value })}
-                    style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Cantidad / Stock *</label>
-                  <input
-                    type="number"
-                    required
-                    value={formTaller.cantidad}
-                    onChange={(e) => setFormTaller({ ...formTaller, cantidad: e.target.value })}
-                    style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Estado del Repuesto</label>
-                  <select
-                    value={formTaller.estado}
-                    onChange={(e) => setFormTaller({ ...formTaller, estado: e.target.value })}
-                    style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
-                  >
-                    <option value="nuevo">Nuevo</option>
-                    <option value="usado_bueno">Usado Bueno</option>
-                    <option value="usado_regular">Usado Regular</option>
-                    <option value="para_reparar">Para Reparar</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>Origen</label>
-                  <select
-                    value={formTaller.origen}
-                    onChange={(e) => setFormTaller({ ...formTaller, origen: e.target.value })}
-                    style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
-                  >
-                    <option value="comprado">Comprado</option>
-                    <option value="proveniente_de_cliente">Proveniente de Cliente</option>
-                  </select>
-                </div>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 'var(--text-small)',
+                    marginBottom: '0.25rem',
+                    color: 'var(--foreground)',
+                  }}
+                >
+                  Estado del Repuesto
+                </label>
+                <select
+                  value={formTaller.estado}
+                  onChange={e => setFormTaller({ ...formTaller, estado: e.target.value })}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    padding: '0.5rem',
+                    borderRadius: '0.375rem',
+                  }}
+                >
+                  <option value="nuevo">Nuevo</option>
+                  <option value="usado_bueno">Usado Bueno</option>
+                  <option value="usado_regular">Usado Regular</option>
+                  <option value="para_reparar">Para Reparar</option>
+                </select>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1rem' }}>
                 <button
                   type="button"
                   onClick={() => setModalTaller(false)}
-                  style={{ backgroundColor: 'transparent', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '0.375rem',
+                    cursor: 'pointer',
+                  }}
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  style={{ backgroundColor: 'var(--yellow-500)', color: '#000', border: 'none', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer', fontWeight: 600 }}
+                  style={{
+                    backgroundColor: 'var(--yellow-500)',
+                    color: '#000',
+                    border: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '0.375rem',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
                 >
                   Guardar
                 </button>
@@ -540,27 +976,367 @@ export default function Repuestos() {
         </div>
       )}
 
+      {/* ── Modal Registrar Repuesto del Cliente (Asociado a Orden) ── */}
+      {modalCliente && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '0.5rem',
+              width: '100%',
+              maxWidth: '520px',
+              padding: '1.5rem',
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 'var(--text-subtitle)',
+                fontWeight: 'bold',
+                marginBottom: '0.5rem',
+                color: 'var(--foreground)',
+              }}
+            >
+              🚗 Registrar Repuesto del Cliente
+            </h2>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--neutral-400)', marginBottom: '1rem' }}>
+              Registra una pieza traída por el cliente o desmontada de su vehículo durante una orden de trabajo.
+            </p>
+
+            <form onSubmit={handleGuardarCliente} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 'var(--text-small)',
+                    marginBottom: '0.25rem',
+                    color: 'var(--foreground)',
+                  }}
+                >
+                  Orden de Trabajo Asociada *
+                </label>
+                <select
+                  required
+                  value={formCliente.id_orden}
+                  onChange={e => handleSeleccionarOrdenCliente(e.target.value)}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    padding: '0.5rem',
+                    borderRadius: '0.375rem',
+                  }}
+                >
+                  <option value="">Selecciona una orden...</option>
+                  {ordenesDisponibles.map(o => (
+                    <option key={o.id} value={o.id}>
+                      Orden #{o.id} — {o.matricula} ({o.marca} {o.modelo}) — {o.nombre_cliente} [{o.estado}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 'var(--text-small)',
+                    marginBottom: '0.25rem',
+                    color: 'var(--foreground)',
+                  }}
+                >
+                  Nombre de la Pieza / Repuesto *
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={150}
+                  placeholder="Ej: Guardafango delantero abollado / Faro izquierdo"
+                  value={formCliente.nombre}
+                  onChange={e => setFormCliente({ ...formCliente, nombre: e.target.value })}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    padding: '0.5rem',
+                    borderRadius: '0.375rem',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--text-small)',
+                      marginBottom: '0.25rem',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    Marca *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={80}
+                    placeholder="Ej: Toyota"
+                    value={formCliente.marca}
+                    onChange={e => setFormCliente({ ...formCliente, marca: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--text-small)',
+                      marginBottom: '0.25rem',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    Modelo *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={80}
+                    placeholder="Ej: Hilux"
+                    value={formCliente.modelo}
+                    onChange={e => setFormCliente({ ...formCliente, modelo: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--text-small)',
+                      marginBottom: '0.25rem',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    Cantidad *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    value={formCliente.cantidad}
+                    onChange={e => setFormCliente({ ...formCliente, cantidad: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 'var(--text-small)',
+                      marginBottom: '0.25rem',
+                      color: 'var(--foreground)',
+                    }}
+                  >
+                    Estado Inicial
+                  </label>
+                  <select
+                    value={formCliente.estado}
+                    onChange={e => setFormCliente({ ...formCliente, estado: e.target.value })}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--background)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--foreground)',
+                      padding: '0.5rem',
+                      borderRadius: '0.375rem',
+                    }}
+                  >
+                    <option value="en_taller">En Taller (En resguardo)</option>
+                    <option value="devuelto">Devuelto a Cliente</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: 'block',
+                    fontSize: 'var(--text-small)',
+                    marginBottom: '0.25rem',
+                    color: 'var(--foreground)',
+                  }}
+                >
+                  Descripción / Observación (Opcional)
+                </label>
+                <textarea
+                  rows={2}
+                  maxLength={500}
+                  placeholder="Ej: Pieza dañada desmontada; cliente indica si la retirará o cederá al taller."
+                  value={formCliente.descripcion}
+                  onChange={e => setFormCliente({ ...formCliente, descripcion: e.target.value })}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--background)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    padding: '0.5rem',
+                    borderRadius: '0.375rem',
+                  }}
+                />
+              </div>
+
+              {errorClienteModal && (
+                <p
+                  style={{
+                    fontSize: 'var(--text-small)',
+                    color: 'var(--danger)',
+                    backgroundColor: 'var(--danger-bg)',
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: '0.375rem',
+                    margin: 0,
+                  }}
+                >
+                  {errorClienteModal}
+                </p>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setModalCliente(false)}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '0.375rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={guardandoCliente}
+                  style={{
+                    backgroundColor: 'var(--yellow-500)',
+                    color: '#000',
+                    border: 'none',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '0.375rem',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  {guardandoCliente ? 'Guardando...' : 'Registrar Repuesto'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ── Modal Confirmar Transferencia a Taller ── */}
       {modalTransferir && (
-        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
-          <div style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '0.5rem', width: '100%', maxWidth: '450px', padding: '1.5rem' }}>
-            <h3 style={{ fontSize: 'var(--text-subtitle)', fontWeight: 'bold', marginBottom: '0.75rem', color: 'var(--foreground)' }}>
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: '0.5rem',
+              width: '100%',
+              maxWidth: '450px',
+              padding: '1.5rem',
+            }}
+          >
+            <h3
+              style={{
+                fontSize: 'var(--text-subtitle)',
+                fontWeight: 'bold',
+                marginBottom: '0.75rem',
+                color: 'var(--foreground)',
+              }}
+            >
               🟢 Transferir Repuesto a Inventario del Taller
             </h3>
             <p style={{ fontSize: 'var(--text-body)', color: 'var(--neutral-300)', marginBottom: '1rem' }}>
-              El repuesto <strong>{modalTransferir.nombre}</strong> será transferido al stock del taller con origen <em>"proveniente_de_cliente"</em>.
+              El repuesto <strong>{modalTransferir.nombre}</strong> será transferido al stock del taller con origen{' '}
+              <em>&quot;proveniente_de_cliente&quot;</em>.
             </p>
 
             <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ display: 'block', fontSize: 'var(--text-small)', marginBottom: '0.25rem', color: 'var(--foreground)' }}>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: 'var(--text-small)',
+                  marginBottom: '0.25rem',
+                  color: 'var(--foreground)',
+                }}
+              >
                 Asignar Precio Estimado de Venta (C$)
               </label>
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 value={precioTransferencia}
-                onChange={(e) => setPrecioTransferencia(e.target.value)}
-                style={{ width: '100%', backgroundColor: 'var(--background)', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem', borderRadius: '0.375rem' }}
+                onChange={e => setPrecioTransferencia(e.target.value)}
+                style={{
+                  width: '100%',
+                  backgroundColor: 'var(--background)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--foreground)',
+                  padding: '0.5rem',
+                  borderRadius: '0.375rem',
+                }}
               />
             </div>
 
@@ -568,7 +1344,14 @@ export default function Repuestos() {
               <button
                 type="button"
                 onClick={() => setModalTransferir(null)}
-                style={{ backgroundColor: 'transparent', border: '1px solid var(--border)', color: 'var(--foreground)', padding: '0.5rem 1rem', borderRadius: '0.375rem', cursor: 'pointer' }}
+                style={{
+                  backgroundColor: 'transparent',
+                  border: '1px solid var(--border)',
+                  color: 'var(--foreground)',
+                  padding: '0.5rem 1rem',
+                  borderRadius: '0.375rem',
+                  cursor: 'pointer',
+                }}
               >
                 Cancelar
               </button>
@@ -587,6 +1370,3 @@ export default function Repuestos() {
     </div>
   )
 }
-
-
-
