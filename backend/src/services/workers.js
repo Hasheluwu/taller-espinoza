@@ -6,12 +6,13 @@ const TIPOS = ['interno', 'externo']
 const ROLES = ['pintor', 'enderezador', 'mecanico', 'otro']
 
 function validatePersonal(body = {}) {
-  const { nombre, tipo, rol, telefono, fijo } = body
+  const { cedula, nombre, tipo, rol, telefono, fijo } = body
+  const cleanCedula = rules.cedula(cedula, { label: 'Cédula del trabajador', required: true })
   const name = rules.personName(nombre, { label: 'Nombre del trabajador' })
   if (!TIPOS.includes(tipo)) fail('Tipo de personal inválido: elige interno o externo.')
   if (!ROLES.includes(rol)) fail('Rol inválido: elige pintor, enderezador, mecánico u otro.')
   const phone = rules.phone(telefono, { label: 'Teléfono del trabajador', required: false })
-  return { nombre: name, tipo, rol, telefono: phone || null, fijo: fijo ? 1 : 0 }
+  return { cedula: cleanCedula, nombre: name, tipo, rol, telefono: phone || null, fijo: fijo ? 1 : 0 }
 }
 
 function normalizeWorkers(body = {}, { requireAmount = false } = {}) {

@@ -165,6 +165,7 @@ const PERSONAL_SELECT = `
   SELECT
     p.id_personal AS id,
     p.id_personal,
+    p.cedula,
     p.nombre,
     p.telefono,
     p.tipo,
@@ -216,6 +217,9 @@ router.post('/personal', requireAuth, async (req, res) => {
     const p = validatePersonal(req.body)
     await conn.beginTransaction()
 
+    const [[sameCedula]] = await conn.query('SELECT id_personal FROM personal WHERE cedula = ?', [p.cedula])
+    if (sameCedula) fail('Ya existe un trabajador registrado con esa cédula.', 409)
+
     const [[same]] = await conn.query(
       'SELECT id_personal FROM personal WHERE LOWER(nombre) = LOWER(?) AND activo = 1',
       [p.nombre]
@@ -223,8 +227,8 @@ router.post('/personal', requireAuth, async (req, res) => {
     if (same) fail('Ya existe un trabajador activo con ese nombre.', 409)
 
     const [result] = await conn.query(
-      'INSERT INTO personal (nombre, telefono, tipo, fijo, activo) VALUES (?, ?, ?, ?, TRUE)',
-      [p.nombre, p.telefono, p.tipo, p.fijo]
+      'INSERT INTO personal (cedula, nombre, telefono, tipo, fijo, activo) VALUES (?, ?, ?, ?, ?, TRUE)',
+      [p.cedula, p.nombre, p.telefono, p.tipo, p.fijo]
     )
     const idEsp = especialidadToId(p.rol)
     await conn.query(
@@ -238,7 +242,7 @@ router.post('/personal', requireAuth, async (req, res) => {
   } catch (err) {
     await conn.rollback()
     console.error(err)
-    res.status(err.status || 500).json({ message: err.status ? err.message : 'Error interno.' })
+    res.status(err.status || 400).json({ message: err.sqlMessage || err.message || 'Error interno.' })
   } finally {
     conn.release()
   }
@@ -251,6 +255,12 @@ router.put('/personal/:id', requireAuth, requireAuth.admin, async (req, res, nex
     const p = validatePersonal(req.body)
     await conn.beginTransaction()
 
+    const [[sameCedula]] = await conn.query(
+      'SELECT id_personal FROM personal WHERE cedula = ? AND id_personal <> ?',
+      [p.cedula, id]
+    )
+    if (sameCedula) fail('Ya existe otro trabajador con esa cédula.', 409)
+
     const [[same]] = await conn.query(
       'SELECT id_personal FROM personal WHERE LOWER(nombre) = LOWER(?) AND activo = 1 AND id_personal <> ?',
       [p.nombre, id]
@@ -258,8 +268,8 @@ router.put('/personal/:id', requireAuth, requireAuth.admin, async (req, res, nex
     if (same) fail('Ya existe otro trabajador activo con ese nombre.', 409)
 
     const [result] = await conn.query(
-      'UPDATE personal SET nombre = ?, tipo = ?, telefono = ?, fijo = ? WHERE id_personal = ?',
-      [p.nombre, p.tipo, p.telefono, p.fijo, id]
+      'UPDATE personal SET cedula = ?, nombre = ?, tipo = ?, telefono = ?, fijo = ? WHERE id_personal = ?',
+      [p.cedula, p.nombre, p.tipo, p.telefono, p.fijo, id]
     )
     if (!result.affectedRows) fail('Trabajador no encontrado.', 404)
 
@@ -271,7 +281,7 @@ router.put('/personal/:id', requireAuth, requireAuth.admin, async (req, res, nex
 
     await conn.query(
       "INSERT INTO auditoria (id_usuario, tabla, id_registro, accion, detalle) VALUES (?, 'personal', ?, 'editar', ?)",
-      [req.usuario.id, String(id), `Datos actualizados: ${p.nombre}, ${p.rol}, ${p.tipo}`]
+      [req.usuario.id, String(id), `Datos actualizados: ${p.nombre} (${p.cedula}), ${p.rol}, ${p.tipo}`]
     )
     await conn.commit()
 
@@ -313,6 +323,7 @@ router.get('/:id_orden/personal', requireAuth, async (req, res) => {
       `SELECT
          op.*,
          p.nombre AS nombre_personal,
+         p.cedula,
          p.tipo,
          p.activo,
          (SELECT pe.id_especialidad FROM personal_especialidad pe WHERE pe.id_personal = p.id_personal LIMIT 1) AS id_especialidad,
@@ -353,6 +364,7 @@ router.post('/:id_orden/personal', requireAuth, async (req, res) => {
       `SELECT
          op.*,
          p.nombre AS nombre_personal,
+         p.cedula,
          p.tipo,
          (SELECT pe.id_especialidad FROM personal_especialidad pe WHERE pe.id_personal = p.id_personal LIMIT 1) AS id_especialidad
        FROM orden_personal op
@@ -387,7 +399,7 @@ router.put('/personal-asignado/:id', requireAuth, async (req, res) => {
     await conn.beginTransaction()
 
     const [[row]] = await conn.query(
-      `SELECT op.*, p.nombre, p.tipo,
+      `SELECT op.*, p.nombre, p.cedula, p.tipo,
          (SELECT pe.id_especialidad FROM personal_especialidad pe WHERE pe.id_personal = p.id_personal LIMIT 1) AS id_especialidad
        FROM orden_personal op
        JOIN personal p ON p.id_personal = op.id_personal
@@ -795,7 +807,6 @@ router.post('/:id_orden/danos', requireAuth, async (req, res) => {
     await conn.beginTransaction()
     const order = await lockOrder(conn, req.params.id_orden)
 
-    // Asegurar que la orden tenga registro en orden_seguro para cumplir la FK de dano_oculto
     const [segRow] = await conn.query('SELECT id_orden FROM orden_seguro WHERE id_orden = ?', [order.id_orden])
     if (segRow.length === 0) {
       await conn.query(

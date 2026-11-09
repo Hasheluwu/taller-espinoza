@@ -31,7 +31,6 @@ function money(value, name, positive = false) {
   return cents(value, name, positive) / 100
 }
 
-// Empaqueta llaves primarias compuestas (ej. id_orden=3, num_linea=1 -> 300001)
 function packId(parentId, childId) {
   return Number(parentId) * 100000 + Number(childId)
 }
@@ -89,12 +88,14 @@ async function lockOrder(conn, id, editable = false) {
     id_orden: tot.id_orden,
     id_vehiculo: tot.matricula,
     matricula: tot.matricula,
+    id_presupuesto: tot.id_presupuesto || null,
+    cargos_desde_proforma: Boolean(tot.id_presupuesto),
     tipo: tipoOrdenToSlug(tot.id_tipo_orden),
     tipo_pago: tipoPago,
     subtotal: Number(tot.subtotal || 0),
     iva: Number(tot.iva || 0),
     costo_total: costoTotal,
-    monto_seguro: esSeguro ? ( costoTotal > 0 ? costoTotal : Number(tot.monto_autorizado || 0) ) : 0,
+    monto_seguro: esSeguro ? (costoTotal > 0 ? costoTotal : Number(tot.monto_autorizado || 0)) : 0,
     monto_cliente: esSeguro ? 0 : costoTotal,
     pagador_unico: 1,
     es_garantia: Boolean(tot.es_reclamo_garantia || tot.tiene_garantia),

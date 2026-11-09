@@ -39,7 +39,6 @@ router.get(
   '/',
   run(async (conn, req) => {
     const available = req.query.disponibles_para_orden === 'true' && req.query.id_vehiculo
-    const privateScope = req.query.ambito === 'particular'
 
     const clauses = ['1=1']
     const values = []
@@ -49,12 +48,6 @@ router.get(
       clauses.push('p.matricula = ?')
       values.push(mat || '')
       clauses.push('op.id_orden IS NULL')
-    } else if (req.query.ambito) {
-      if (privateScope) {
-        clauses.push('va.id_aseguradora IS NULL')
-      } else {
-        clauses.push('va.id_aseguradora IS NOT NULL')
-      }
     }
 
     if (req.query.q?.trim()) {

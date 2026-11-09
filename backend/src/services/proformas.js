@@ -12,6 +12,9 @@ const {
 const json = value => (typeof value === 'string' ? JSON.parse(value) : value)
 let nextSequenceNumber = 17293
 
+// Memoria de metadatos de proformas creadas en sesión (seguro elegido: PARTICULAR, LAFISE o INISER)
+const proformaMeta = new Map()
+
 function text(value, label, max = 255, required = false) {
   const s = String(value ?? '').trim()
   if ((required && !s) || s.length > max) {
@@ -121,6 +124,15 @@ function snapshot(v) {
   }
 }
 
+function detectSeguroFromText(obs = '', defaultVehicleSeguro = 'ninguna', meta = null) {
+  if (meta?.seguro) return meta.seguro
+  const s = String(obs || '').toUpperCase()
+  if (s.includes('[PARTICULAR]') || s.includes('CLIENTE APRUEBA')) return 'PARTICULAR'
+  if (s.includes('LAFISE')) return 'LAFISE'
+  if (s.includes('INISER')) return 'INISER'
+  return defaultVehicleSeguro === 'ninguna' ? 'PARTICULAR' : defaultVehicleSeguro.toUpperCase()
+}
+
 async function read(conn, id, lock = false) {
   const presId = number(id, 'Proforma', { positive: true, integer: true })
   if (lock) {
@@ -138,9 +150,10 @@ async function read(conn, id, lock = false) {
     [presId]
   )
   const v = await context(conn, p.matricula)
-  const seguro = v.aseguradora === 'ninguna' ? 'PARTICULAR' : v.aseguradora.toUpperCase()
+  const meta = proformaMeta.get(Number(presId))
+  const seguro = detectSeguroFromText(p.observaciones, v.aseguradora, meta)
   const faseMap = { pendiente: 'emitida', aprobado: 'aprobada', rechazado: 'rechazada' }
-  const fase = faseMap[p.estado] || 'emitida'
+  const fase = meta?.fase || faseMap[p.estado] || 'emitida'
 
   return {
     ...p,
@@ -151,20 +164,20 @@ async function read(conn, id, lock = false) {
     iva: Number(p.iva),
     total: Number(p.total),
     numero: 17000 + Number(p.id_presupuesto),
-    version: 1,
+    version: meta?.version || 1,
     fase,
-    es_cotizacion: false,
+    es_cotizacion: Boolean(meta?.es_cotizacion),
     seguro,
-    tramite: '',
-    reclamo: '',
-    mano_obra_global: null,
+    tramite: meta?.tramite || '',
+    reclamo: meta?.reclamo || '',
+    mano_obra_global: meta?.mano_obra_global ?? null,
     datos: snapshot(v),
     detalles: detalles.map(d => ({
       ...d,
       id: packId(d.id_presupuesto, d.num_linea),
       aplica_iva: Boolean(d.aplica_iva),
     })),
-    versiones: [{ version: 1, emitida: new Date(p.fecha).toISOString(), desde_orden: null }],
+    versiones: [{ version: meta?.version || 1, emitida: new Date(p.fecha).toISOString(), desde_orden: null }],
     ordenes: ordenes.map(o => o.id_orden),
     vehiculo_actual: v,
   }
@@ -187,19 +200,23 @@ async function nextNumber() {
 async function save(conn, id, body, user) {
   const totals = calculate(body)
   const fecha = text(body.fecha, 'Fecha', 10, true)
-  const obs = text(body.observaciones, 'Observaciones', 4000)
+  const seguro = text(body.seguro || 'PARTICULAR', 'Aseguradora', 100, true).toUpperCase()
+  const rawObs = text(body.observaciones, 'Observaciones', 4000)
 
   let matricula = await resolveMatricula(conn, body.id_vehiculo || body.matricula || body.datos?.placa)
   if (!matricula && body.datos) {
     matricula = await require('./quotationRegistration').register(
       conn,
-      { datos: quotationData(body.datos), seguro: body.seguro || 'PARTICULAR' },
+      { datos: quotationData(body.datos), seguro },
       body.datos
     )
   }
   if (!matricula) fail('Selecciona un vehículo válido para registrar el presupuesto.', 400)
 
   let presId = id ? number(id, 'Proforma', { positive: true, integer: true }) : null
+  const prevMeta = presId ? proformaMeta.get(Number(presId)) : null
+  const nextVersion = prevMeta ? prevMeta.version + 1 : 1
+
   if (presId) {
     const old = await read(conn, presId, true)
     if (old.ordenes.length) {
@@ -208,17 +225,27 @@ async function save(conn, id, body, user) {
     await conn.query(
       `UPDATE presupuesto SET matricula = ?, fecha = ?, estado = 'pendiente', observaciones = ?
        WHERE id_presupuesto = ?`,
-      [matricula, fecha, obs || null, presId]
+      [matricula, fecha, rawObs || null, presId]
     )
     await conn.query('DELETE FROM presupuesto_detalle WHERE id_presupuesto = ?', [presId])
   } else {
     const [result] = await conn.query(
       `INSERT INTO presupuesto (matricula, fecha, estado, observaciones)
        VALUES (?, ?, 'pendiente', ?)`,
-      [matricula, fecha, obs || null]
+      [matricula, fecha, rawObs || null]
     )
     presId = result.insertId
   }
+
+  proformaMeta.set(Number(presId), {
+    seguro,
+    tramite: body.tramite || '',
+    reclamo: body.reclamo || '',
+    mano_obra_global: totals.mano_obra_global,
+    es_cotizacion: Boolean(body.es_cotizacion),
+    version: nextVersion,
+    fase: 'borrador',
+  })
 
   let numLinea = 1
   for (const d of totals.detalles) {
@@ -238,7 +265,7 @@ async function save(conn, id, body, user) {
     numLinea += 1
   }
 
-  await audit(conn, user, presId, id ? 'editar' : 'crear', `Presupuesto guardado; total C$ ${totals.total}`)
+  await audit(conn, user, presId, id ? 'editar' : 'crear', `Presupuesto (${seguro}) guardado; total C$ ${totals.total}`)
   return read(conn, presId)
 }
 
@@ -247,6 +274,8 @@ async function emit(conn, id, _version, user) {
   if (!p.detalles.length || Number(p.total) <= 0) {
     fail('Agrega trabajos o repuestos y un total mayor que cero antes de emitir.')
   }
+  const meta = proformaMeta.get(Number(id)) || {}
+  proformaMeta.set(Number(id), { ...meta, seguro: p.seguro, version: p.version, fase: 'emitida' })
   await audit(conn, user, id, 'cambio_estado', `Emitida proforma ${p.numero}`)
   return read(conn, id)
 }
@@ -259,6 +288,8 @@ async function changeState(conn, id, body, user) {
   const nuevoEstado = fase === 'aprobada' ? 'aprobado' : 'rechazado'
   const motivo = text(body.motivo, 'Motivo', 500, fase === 'anulada')
   await conn.query('UPDATE presupuesto SET estado = ? WHERE id_presupuesto = ?', [nuevoEstado, id])
+  const meta = proformaMeta.get(Number(id)) || {}
+  proformaMeta.set(Number(id), { ...meta, seguro: p.seguro, version: p.version, fase })
   await audit(conn, user, id, 'cambio_estado', `${fase}: ${motivo}`)
   return read(conn, id)
 }
@@ -277,7 +308,15 @@ async function convert(conn, id, body, user) {
   }
   validateDates(body)
 
-  const insured = p.seguro !== 'PARTICULAR'
+  // Respetar si el usuario eligió 'particular' en el formulario de la orden,
+  // incluso si el vehículo tiene aseguradora afiliada en vehiculo_aseguradora.
+  const chosenPayer = body.tipo_pago
+    ? String(body.tipo_pago).toLowerCase()
+    : p.seguro === 'PARTICULAR'
+      ? 'particular'
+      : p.seguro.toLowerCase()
+  const insured = chosenPayer === 'lafise' || chosenPayer === 'iniser'
+
   const idTipoOrden = tipoOrdenToId(body.tipo)
   const entrega = body.fecha_entrega_estimada || null
 
@@ -291,8 +330,8 @@ async function convert(conn, id, body, user) {
   await conn.query('INSERT INTO orden_presupuesto (id_orden, id_presupuesto) VALUES (?, ?)', [orderId, p.id_presupuesto])
 
   if (insured) {
-    const idAseg = aseguradoraToId(p.seguro)
-    const tramite = body.numero_tramite || `TRAM-${p.seguro}-${orderId}`
+    const idAseg = aseguradoraToId(chosenPayer)
+    const tramite = body.numero_tramite || p.tramite || p.reclamo || `TRAM-${chosenPayer.toUpperCase()}-${orderId}`
     const ordenSeg = body.numero_orden_seguro || null
     await conn.query(
       `INSERT INTO orden_seguro (id_orden, id_aseguradora, numero_tramite, numero_orden_seguro, monto_autorizado)
@@ -307,7 +346,13 @@ async function convert(conn, id, body, user) {
     await conn.query(
       `INSERT INTO orden_servicio (id_orden, num_linea, descripcion, precio, aplica_iva)
        VALUES (?, ?, ?, ?, ?)`,
-      [orderId, numLinea, text(`${d.cantidad} × ${d.descripcion}`, 'Descripción de cargo', 255), base, d.aplica_iva ? 1 : 0]
+      [
+        orderId,
+        numLinea,
+        text(`${Number(d.cantidad)} × ${d.descripcion}`, 'Descripción de cargo', 255),
+        base,
+        d.aplica_iva ? 1 : 0,
+      ]
     )
     numLinea += 1
   }
@@ -319,7 +364,7 @@ async function convert(conn, id, body, user) {
     )
   }
 
-  await audit(conn, user, id, 'cambio_estado', `Convertida en orden #${orderId}`)
+  await audit(conn, user, id, 'cambio_estado', `Convertida en orden #${orderId} (${chosenPayer})`)
   const order = await require('./validation').lockOrder(conn, orderId)
   return { ...order, matricula: p.matricula, nombre_cliente: p.datos.cliente }
 }

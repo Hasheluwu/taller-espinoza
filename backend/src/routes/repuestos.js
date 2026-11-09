@@ -30,7 +30,8 @@ const REPUESTO_TALLER_SELECT = `
     v.cantidad_ingresada,
     v.id_condicion,
     CASE
-      WHEN v.origen = 'transferido_de_cliente' THEN 'proveniente_de_cliente'
+      WHEN EXISTS (SELECT 1 FROM transferencia_repuesto tr WHERE tr.id_repuesto = v.id_repuesto)
+        THEN 'proveniente_de_cliente'
       ELSE 'comprado'
     END AS origen,
     v.fecha_ingreso
@@ -63,9 +64,11 @@ router.get('/taller', requireAuth, async (req, res) => {
   }
 
   if (origen) {
-    const targetOrigen = origen === 'proveniente_de_cliente' ? 'transferido_de_cliente' : 'compra_taller'
-    sql += ` AND v.origen = ?`
-    params.push(targetOrigen)
+    if (origen === 'proveniente_de_cliente') {
+      sql += ` AND EXISTS (SELECT 1 FROM transferencia_repuesto tr WHERE tr.id_repuesto = v.id_repuesto)`
+    } else {
+      sql += ` AND NOT EXISTS (SELECT 1 FROM transferencia_repuesto tr WHERE tr.id_repuesto = v.id_repuesto)`
+    }
   }
 
   sql += ` ORDER BY v.id_repuesto DESC`

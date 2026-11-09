@@ -2,6 +2,14 @@
 const { fail, cents, lockOrder, packId } = require('./validation')
 const proformas = require('./proformas')
 
+function cleanDesc(str = '') {
+  return String(str)
+    .trim()
+    .replace(/^\d+(?:\.\d+)?\s*[×x]\s*/i, '')
+    .trim()
+    .toLowerCase()
+}
+
 async function pendingCharges(conn, p) {
   const orderId = p.ordenes?.[0]
   if (!orderId) fail('Esta proforma todavía no tiene una orden de trabajo.', 409)
@@ -11,17 +19,24 @@ async function pendingCharges(conn, p) {
     [orderId]
   )
 
-  const expected = p.detalles.map(
-    d => `${d.cantidad} × ${d.descripcion}|${Math.round(Number(d.cantidad) * cents(d.precio_unitario))}`
-  )
+  // Construimos la lista de conceptos que ya existen en el presupuesto
+  const poolExpected = p.detalles.map(d => ({
+    desc: cleanDesc(d.descripcion),
+    cents: Math.round(Number(d.cantidad) * cents(d.precio_unitario)),
+    used: false,
+  }))
+
   const extras = []
   for (const line of lines) {
-    const key = `${line.descripcion}|${cents(line.precio)}`
-    const at = expected.indexOf(key)
-    if (at >= 0) {
-      expected.splice(at, 1)
+    const lineDesc = cleanDesc(line.descripcion)
+    const lineCents = cents(line.precio)
+
+    const match = poolExpected.find(e => !e.used && e.desc === lineDesc && e.cents === lineCents)
+    if (match) {
+      match.used = true
       continue
     }
+
     extras.push({
       id: packId(orderId, line.num_linea),
       num_linea: line.num_linea,
@@ -65,7 +80,8 @@ async function updateFromOrder(conn, id, user) {
     'editar',
     `Actualizada desde la orden #${orderId}: ${extras.length} cargo(s) nuevo(s)`
   )
-  return { ...(await proformas.read(conn, id)), cargos_agregados: extras }
+  const updated = await proformas.read(conn, id)
+  return { ...updated, version: (updated.version || 1) + 1, cargos_agregados: extras }
 }
 
 module.exports = { pendingCharges, updateFromOrder }
