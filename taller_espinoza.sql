@@ -1,5 +1,5 @@
 -- ============================================================================
--- TALLER PEDRO ESPINOZA — SCRIPT 01: DDL MODELO RELACIONAL (53 TABLAS + 8 TRIGGERS + 7 VISTAS)
+-- TALLER PEDRO ESPINOZA — SCRIPT 01: DDL MODELO RELACIONAL (53 TABLAS + 10 TRIGGERS + 7 VISTAS)
 -- Motor: MySQL 8.0+ (InnoDB, utf8mb4)
 -- Normalización: 3FN / BCNF estricta (Cero columnas calculadas, cero JSON, cero ENUMs)
 -- ============================================================================
@@ -10,6 +10,7 @@ CREATE DATABASE IF NOT EXISTS taller_pedro_espinoza
   COLLATE utf8mb4_unicode_ci;
 
 USE taller_pedro_espinoza;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- ============================================================================
 -- 1. CATÁLOGOS (11 tablas)
@@ -145,11 +146,13 @@ CREATE TABLE proveedor (
 
 CREATE TABLE personal (
   id_personal INT AUTO_INCREMENT PRIMARY KEY,
+  cedula VARCHAR(20) NOT NULL,
   nombre VARCHAR(150) NOT NULL,
   telefono VARCHAR(20) NULL,
   tipo VARCHAR(10) NOT NULL,
   fijo BOOLEAN NOT NULL,
   activo BOOLEAN NOT NULL DEFAULT TRUE,
+  CONSTRAINT uq_personal_cedula UNIQUE (cedula),
   CONSTRAINT chk_personal_tipo CHECK (tipo IN ('interno', 'externo'))
 ) ENGINE=InnoDB;
 
@@ -584,7 +587,7 @@ CREATE TABLE auditoria (
 ) ENGINE=InnoDB;
 
 -- ============================================================================
--- 7. TRIGGERS DE INTEGRIDAD RELACIONAL (SUBTIPOS DISJUNTOS Y SOLAPAMIENTO)
+-- 7. TRIGGERS DE INTEGRIDAD RELACIONAL (10 TRIGGERS)
 -- ============================================================================
 
 DELIMITER $$
@@ -686,13 +689,54 @@ BEGIN
   END IF;
 END$$
 
+-- 7.5 Validación de formato de Cédula y no duplicidad en Personal
+CREATE TRIGGER trg_personal_validacion_ins
+BEFORE INSERT ON personal
+FOR EACH ROW
+BEGIN
+  SET NEW.cedula = UPPER(TRIM(NEW.cedula));
+  SET NEW.nombre = TRIM(NEW.nombre);
+
+  IF NEW.cedula NOT REGEXP '^[0-9]{3}-[0-9]{6}-[0-9]{4}[A-Z]$' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Formato inválido en BD: La cédula del personal debe cumplir el formato 001-010190-0001A.';
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM personal WHERE LOWER(nombre) = LOWER(NEW.nombre) AND activo = TRUE) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Registro duplicado en BD: Ya existe un trabajador activo con ese nombre.';
+  END IF;
+END$$
+
+CREATE TRIGGER trg_personal_validacion_upd
+BEFORE UPDATE ON personal
+FOR EACH ROW
+BEGIN
+  SET NEW.cedula = UPPER(TRIM(NEW.cedula));
+  SET NEW.nombre = TRIM(NEW.nombre);
+
+  IF NEW.cedula NOT REGEXP '^[0-9]{3}-[0-9]{6}-[0-9]{4}[A-Z]$' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Formato inválido en BD: La cédula del personal debe cumplir el formato 001-010190-0001A.';
+  END IF;
+
+  IF NEW.activo = TRUE AND EXISTS (
+    SELECT 1 FROM personal
+    WHERE LOWER(nombre) = LOWER(NEW.nombre)
+      AND activo = TRUE
+      AND id_personal <> NEW.id_personal
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Registro duplicado en BD: Ya existe otro trabajador activo con ese nombre.';
+  END IF;
+END$$
+
 DELIMITER ;
 
 -- ============================================================================
 -- 8. VISTAS PARA DATOS DERIVADOS (7 Vistas eficientes en 3FN)
 -- ============================================================================
 
--- 8.1 Stock actual de materiales consumibles
 CREATE OR REPLACE VIEW vw_stock_material AS
 SELECT
   m.id_material,
@@ -710,7 +754,6 @@ SELECT
 FROM material m
 JOIN unidad_medida u ON u.id_unidad = m.id_unidad;
 
--- 8.2 Kardex / Historial unificado de movimientos de materiales (sin NULLs estructurales)
 CREATE OR REPLACE VIEW vw_movimiento_material AS
 SELECT
   cd.id_material,
@@ -743,7 +786,6 @@ SELECT
   am.nota
 FROM ajuste_material am;
 
--- 8.3 Stock disponible y origen de repuestos del taller
 CREATE OR REPLACE VIEW vw_stock_repuesto_taller AS
 SELECT
   rt.id_repuesto,
@@ -766,7 +808,6 @@ JOIN marca ma ON ma.id_marca = mo.id_marca
 JOIN condicion_repuesto cr ON cr.id_condicion = rt.id_condicion
 LEFT JOIN transferencia_repuesto tr ON tr.id_repuesto = rt.id_repuesto;
 
--- 8.4 Totales calculados de presupuestos / proformas (IVA 15%)
 CREATE OR REPLACE VIEW vw_totales_presupuesto AS
 SELECT
   p.id_presupuesto,
@@ -781,7 +822,6 @@ FROM presupuesto p
 LEFT JOIN presupuesto_detalle pd ON pd.id_presupuesto = p.id_presupuesto
 GROUP BY p.id_presupuesto, p.matricula, p.fecha, p.estado, p.observaciones;
 
--- 8.5 Totales, saldos e indicadores derivados de órdenes
 CREATE OR REPLACE VIEW vw_totales_orden AS
 SELECT
   o.id_orden,
@@ -822,7 +862,6 @@ LEFT JOIN orden_presupuesto opres ON opres.id_orden = o.id_orden
 LEFT JOIN orden_seguro oseg ON oseg.id_orden = o.id_orden
 LEFT JOIN aseguradora aseg ON aseg.id_aseguradora = oseg.id_aseguradora;
 
--- 8.6 Totales y clasificación de facturas
 CREATE OR REPLACE VIEW vw_totales_factura AS
 SELECT
   f.numero_factura,
@@ -839,7 +878,6 @@ FROM factura f
 LEFT JOIN factura_cliente fc ON fc.numero_factura = f.numero_factura
 LEFT JOIN factura_seguro fs ON fs.numero_factura = f.numero_factura;
 
--- 8.7 Totales y estado de liquidaciones de personal
 CREATE OR REPLACE VIEW vw_totales_liquidacion AS
 SELECT
   l.id_liquidacion,
